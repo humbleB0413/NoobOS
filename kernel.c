@@ -1,11 +1,4 @@
-#include "linux/vga.h"
-#include "linux/gdt.h"
-#include "linux/idt.h"
-#include "linux/trap.h"
-#include "linux/irq.h"
-#include "driver/pic.h"
-#include "driver/timer.h"
-#include "driver/keyboard.h"
+#include "kernel.h"
 
 int kernel_main(unsigned long magic, unsigned long addr){
 
@@ -18,21 +11,29 @@ int kernel_main(unsigned long magic, unsigned long addr){
     __asm__ volatile ("sti");
     init_timer();
     init_keyboard();
-
-    kprintf("MAGIC:%d\n", magic);
-    kprintf("Hello World!\n");
+    init_pmm(addr);
     
     char keyboard_input = '\0';
+    uint32_t frame_no = 0;
     while(1){
         keyboard_input = keyboard_get_key();
-        if(keyboard_input){
-            kprintf("KEY: %c\n", keyboard_input);
+        
+        if(keyboard_input == 'a'){
+            terminal_initialize();
+            print_frame_state();
         }
-        //else{
-        //    kprintf("TIMER: %d\n", get_ticks());
-        //}
-    
-        //sleep(1);
+        else if(keyboard_input == 's'){
+            terminal_initialize();
+            frame_no = alloc_frame();
+            kprintf("Allocated: frame %d (addr 0x%x)\n", frame_no, frame_no * PAGE_SIZE);
+            kprintf("free frames remaining: %u\n", pmm_free_count());
+        }
+        else if(keyboard_input == 'd'){
+            terminal_initialize();
+            free_frame(frame_no);
+            kprintf("Freed: frame %d\n", frame_no);
+            kprintf("free frames remaining: %u\n", pmm_free_count());
+        }
     }
 
     return 0;
