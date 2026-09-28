@@ -7,7 +7,7 @@
 static keyboard_t KEYBOARD_INPUT;
 extern __attribute__((aligned(0x10))) idtr_t KERNEL_IDT[IDT_ENTRIES_SIZE];
 extern void asm_irq_keyboard();
-uint8_t scancode_to_ascii(uint8_t code, int shift);
+uint8_t scancode_to_ascii(uint8_t code, int shift, int extended);
 
 void init_keyboard() {
   KEYBOARD_INPUT.head = 0;
@@ -77,7 +77,7 @@ void irq_keyboard(pt_regs* regs) {
         KEYBOARD_INPUT.tail = -1; // 초기화: 비어 있는 상태를 제외하고 항상 tail이 head 앞에 오도록
         KEYBOARD_INPUT.head = 0;
       }
-      KEYBOARD_INPUT.input[++KEYBOARD_INPUT.tail] = scancode_to_ascii(code, shift_pressed);
+      KEYBOARD_INPUT.input[++KEYBOARD_INPUT.tail] = scancode_to_ascii(code, shift_pressed, extended);
     }
 
     extended = 0;
@@ -86,7 +86,38 @@ void irq_keyboard(pt_regs* regs) {
   pic_send_eoi(irq);
 }
 
-uint8_t scancode_to_ascii(uint8_t code, int shift) {
+uint8_t scancode_to_ascii(uint8_t code, int shift, int extended) {
+  if (extended) {
+    switch (code) {
+      case 0x48:
+        return KEY_UP;
+      case 0x50:
+        return KEY_DOWN;
+      case 0x4B:
+        return KEY_LEFT;
+      case 0x4D:
+        return KEY_RIGHT;
+      case 0x47:
+        return KEY_HOME;
+      case 0x4F:
+        return KEY_END;
+      case 0x49:
+        return KEY_PAGE_UP;
+      case 0x51:
+        return KEY_PAGE_DOWN;
+      case 0x52:
+        return KEY_INSERT;
+      case 0x53:
+        return KEY_DELETE;
+      case 0x1C:
+        return '\n'; /* keypad Enter */
+      case 0x35:
+        return '/'; /* keypad / */
+      default:
+        return '\0';
+    }
+  }
+
   switch (code) {
     case 0x01:
       return 0x1B; /* Esc */

@@ -34,7 +34,20 @@
 #define KEYBOARD_RESPONSE_RESEND 0xFE
 #define KEYBOARD_RESPONSE_BUFFER_OVERRUN 0xFF
 
-#define KEYBOARD_INPUT_BUFFER_SIZE 256
+#define KEYBOARD_INPUT_BUFFER_SIZE 3000
+
+/* scancode_to_ascii()의 일반 반환값은 ASCII(0x00~0x7F) 범위이므로,
+   ASCII로 표현할 수 없는 확장(0xE0 접두) 키들은 0x80 이상을 예약해 구분한다. */
+#define KEY_UP        0x80
+#define KEY_DOWN      0x81
+#define KEY_LEFT      0x82
+#define KEY_RIGHT     0x83
+#define KEY_HOME      0x84
+#define KEY_END       0x85
+#define KEY_PAGE_UP   0x86
+#define KEY_PAGE_DOWN 0x87
+#define KEY_INSERT    0x88
+#define KEY_DELETE    0x89
 
 typedef struct{
     int head;
