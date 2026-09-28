@@ -10,6 +10,7 @@
 #include "driver/timer.h"
 #include "driver/keyboard.h"
 #include "mm/pmm.h"
+#include "mm/vmm.h"
 #include "multiboot.h"
 
 #endif
