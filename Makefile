@@ -35,6 +35,8 @@ endif
 ASFLAGS := $(CFLAGS)
 
 LDFLAGS := -T linker.ld -nostdlib
+# 64비트 나눗셈(__udivdi3 등) 같은 컴파일러 런타임 헬퍼. -nostdlib 이라 직접 링크해야 한다
+LIBGCC  := $(shell $(CC) -print-libgcc-file-name)
 
 OBJ_DIR := $(BUILD_DIR)/$(MODE)
 KERNEL  := $(OBJ_DIR)/kernel.elf
@@ -65,7 +67,7 @@ all: $(KERNEL)
 	@echo "[$(MODE)] $(KERNEL) ready"
 
 $(KERNEL): $(OBJS) linker.ld
-	$(LD) $(LDFLAGS) -o $@ $(OBJS)
+	$(LD) $(LDFLAGS) -o $@ $(OBJS) $(LIBGCC)
 
 $(OBJ_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)

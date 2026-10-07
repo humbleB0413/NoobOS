@@ -100,124 +100,114 @@ void terminal_writestring(const char* data) {
   terminal_write(data, strlen(data));
 }
 
-static void kprint_int(long n)
+/* 숫자를 base 진법 문자열로 buf 에 역순 없이 채우고 길이를 돌려준다 (64비트 나눗셈은 libgcc 의 __udivdi3/__umoddi3) */
+static int kformat_uint(char *buf, unsigned long long n, unsigned base, int uppercase)
 {
-    char buf[32];
-    int  i = 0;
+    const char *digits = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
+    char tmp[64];
+    int  len = 0, i = 0;
 
-    if (n < 0) {
-        terminal_putchar('-');
-        n = -n;
-    }
-    if (n == 0) {
-        terminal_putchar('0');
-        return;
-    }
-    while (n > 0) {
-        buf[i++] = '0' + (n % 10);
-        n /= 10;
-    }
-    while (i > 0)
-        terminal_putchar(buf[--i]);
-}
-
-static void kprint_uint(unsigned long n, int base, int uppercase)
-{
-    const char *digits = uppercase ? "0123456789ABCDEF"
-                                   : "0123456789abcdef";
-    char buf[64];
-    int  i = 0;
-
-    if (n == 0) {
-        terminal_putchar('0');
-        return;
-    }
-    while (n > 0) {
-        buf[i++] = digits[n % base];
+    do {
+        tmp[len++] = digits[n % base];
         n /= base;
-    }
-    while (i > 0)
-        terminal_putchar(buf[--i]);
+    } while (n > 0);
+    while (len > 0)
+        buf[i++] = tmp[--len];
+    return i;
 }
 
+/* sign("-" 또는 "0x" 같은 접두어) + body 를 width 에 맞춰 출력. '0' 패딩은 접두어 뒤에 채운다 */
+static void kput_field(const char *prefix, const char *body, int body_len,
+                       int width, int left_align, int zero_pad)
+{
+    int prefix_len = prefix ? (int)strlen(prefix) : 0;
+    int pad = width - prefix_len - body_len;
+
+    if (!left_align && !zero_pad)
+        while (pad-- > 0) terminal_putchar(' ');
+    if (prefix)
+        terminal_writestring(prefix);
+    if (!left_align && zero_pad)
+        while (pad-- > 0) terminal_putchar('0');
+    for (int i = 0; i < body_len; i++)
+        terminal_putchar(body[i]);
+    if (left_align)
+        while (pad-- > 0) terminal_putchar(' ');
+}
+
+/*
+ * 지원: %d %i %u %x %X %o %b(2진수, 비표준) %c %s %p %%
+ * 플래그 '-'(왼쪽 정렬) '0'(0 채움), 폭(숫자), 길이 지정자 l / ll(64비트)
+ */
 void kvprintf(const char *fmt, va_list ap)
 {
+    char buf[72];
 
     while (*fmt) {
         if (*fmt != '%') {
             terminal_putchar(*fmt++);
             continue;
         }
-
         fmt++; // skip '%'
 
-        // length modifier
-        int is_long      = 0;
+        int left_align = 0, zero_pad = 0, width = 0;
+        for (;; fmt++) {
+            if (*fmt == '-') left_align = 1;
+            else if (*fmt == '0') zero_pad = 1;
+            else break;
+        }
+        while (*fmt >= '0' && *fmt <= '9')
+            width = width * 10 + (*fmt++ - '0');
+
         int is_long_long = 0;
         if (*fmt == 'l') {
             fmt++;
             if (*fmt == 'l') { fmt++; is_long_long = 1; }
-            else              {        is_long      = 1; }
         }
+
+        unsigned base = 10;
+        int uppercase = 0;
 
         switch (*fmt) {
         case 'd': case 'i': {
-            long val = is_long_long ? (long)va_arg(ap, long long)
-                     : is_long      ? va_arg(ap, long)
-                     :                va_arg(ap, int);
-            kprint_int(val);
+            long long val = is_long_long ? va_arg(ap, long long) : (long long)va_arg(ap, int);
+            unsigned long long mag = val < 0 ? -(unsigned long long)val : (unsigned long long)val;
+            int len = kformat_uint(buf, mag, 10, 0);
+            kput_field(val < 0 ? "-" : 0, buf, len, width, left_align, zero_pad);
             break;
         }
-        case 'u': {
-            unsigned long val = is_long_long ? (unsigned long)va_arg(ap, unsigned long long)
-                              : is_long      ? va_arg(ap, unsigned long)
-                              :                va_arg(ap, unsigned int);
-            kprint_uint(val, 10, 0);
+        case 'X': uppercase = 1; /* fallthrough */
+        case 'x': base = 16; goto unsigned_conv;
+        case 'o': base = 8;  goto unsigned_conv;
+        case 'b': base = 2;  goto unsigned_conv;   // 커널 디버깅용 binary (비표준이지만 유용)
+        case 'u':
+        unsigned_conv: {
+            unsigned long long val = is_long_long ? va_arg(ap, unsigned long long)
+                                                  : (unsigned long long)va_arg(ap, unsigned int);
+            int len = kformat_uint(buf, val, base, uppercase);
+            kput_field(0, buf, len, width, left_align, zero_pad);
             break;
         }
-        case 'x': {
-            unsigned long val = is_long_long ? (unsigned long)va_arg(ap, unsigned long long)
-                              : is_long      ? va_arg(ap, unsigned long)
-                              :                va_arg(ap, unsigned int);
-            kprint_uint(val, 16, 0);
-            break;
-        }
-        case 'X': {
-            unsigned long val = is_long_long ? (unsigned long)va_arg(ap, unsigned long long)
-                              : is_long      ? va_arg(ap, unsigned long)
-                              :                va_arg(ap, unsigned int);
-            kprint_uint(val, 16, 1);
-            break;
-        }
-        case 'o': {
-            unsigned long val = is_long_long ? (unsigned long)va_arg(ap, unsigned long long)
-                              : is_long      ? va_arg(ap, unsigned long)
-                              :                va_arg(ap, unsigned int);
-            kprint_uint(val, 8, 0);
-            break;
-        }
-        case 'b': {                          // 커널 디버깅용 binary (비표준이지만 유용)
-            unsigned long val = is_long_long ? (unsigned long)va_arg(ap, unsigned long long)
-                              : is_long      ? va_arg(ap, unsigned long)
-                              :                va_arg(ap, unsigned int);
-            kprint_uint(val, 2, 0);
+        case 'p': {
+            int len = kformat_uint(buf, (uintptr_t)va_arg(ap, void *), 16, 0);
+            kput_field("0x", buf, len, width, left_align, zero_pad);
             break;
         }
         case 'c':
-            terminal_putchar((char)va_arg(ap, int));
+            buf[0] = (char)va_arg(ap, int);
+            kput_field(0, buf, 1, width, left_align, 0);
             break;
         case 's': {
-            const char *s = va_arg(ap, const char *);
-            terminal_writestring(s ? s : "(null)");
+            const char *str = va_arg(ap, const char *);
+            if (!str) str = "(null)";
+            kput_field(0, str, (int)strlen(str), width, left_align, 0);
             break;
         }
-        case 'p':
-            terminal_writestring("0x");
-            kprint_uint((uintptr_t)va_arg(ap, void *), 16, 0);
-            break;
         case '%':
             terminal_putchar('%');
             break;
+        case '\0':
+            return;
         default:
             terminal_putchar('%');
             terminal_putchar(*fmt);
