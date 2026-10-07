@@ -203,6 +203,25 @@ void kfree_page(void *page) {
   spin_unlock(&heap_lock);
 }
 
+void *vmm_map_physical(uint32_t phys, uint32_t size) {
+  uint32_t first = phys & PAGE_FRAME_MASK;
+  uint32_t pages = (phys + size - first + PAGE_SIZE - 1) / PAGE_SIZE;
+
+  spin_lock(&heap_lock);
+  uint32_t index = heap_find_free_run(pages);
+  if (index == PMM_ERROR_CODE) {
+    spin_unlock(&heap_lock);
+    return 0;
+  }
+  /* PMM 에서 받은 프레임이 아니므로 kfree 경로(heap_release_page)로 풀면 안 된다 */
+  for (uint32_t i = 0; i < pages; i++) {
+    set_pt_entry(&pmm.kernel_heap[index + i], first + i * PAGE_SIZE, PAGE_PRESENT | PAGE_RW);
+    invlpg(KERNEL_HEAP_VIRT_BASE + (index + i) * PAGE_SIZE);
+  }
+  spin_unlock(&heap_lock);
+  return (void *)(KERNEL_HEAP_VIRT_BASE + index * PAGE_SIZE + (phys - first));
+}
+
 uint32_t vmm_kernel_cr3(void) {
   return (uint32_t)pmm.kernel_pdt;
 }

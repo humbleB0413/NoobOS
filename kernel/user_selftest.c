@@ -6,6 +6,7 @@
 #include "../driver/timer.h"
 #include "../mm/pmm.h"
 #include "uapi/syscall_nr.h"
+#include "../fs/vfs.h"
 
 #define UBLOB(name) extern const char ublob_##name[], ublob_##name##_end[]
 UBLOB(hello);
@@ -13,6 +14,8 @@ UBLOB(cli);
 UBLOB(kwrite);
 UBLOB(badptr);
 UBLOB(spin);
+UBLOB(cat);
+UBLOB(noent);
 
 #define UTEST_CODE_BASE 0x08048000u
 
@@ -54,6 +57,13 @@ int usermode_selftest(void) {
 
   pid = spawn_blob("u-badptr", ublob_badptr, ublob_badptr_end);
   pass &= check("kernel pointer passed to write() -> E_FAULT", pid && process_wait(pid) == E_FAULT);
+
+  vfs_node_t *motd = vfs_lookup("/etc/motd");
+  pid = spawn_blob("u-cat", ublob_cat, ublob_cat_end);
+  pass &= check("open/read/close a file from the initrd", motd && pid && process_wait(pid) == (int)motd->size);
+
+  pid = spawn_blob("u-noent", ublob_noent, ublob_noent_end);
+  pass &= check("open of a missing file -> E_NOENT", pid && process_wait(pid) == E_NOENT);
 
   pid = spawn_blob("u-spin", ublob_spin, ublob_spin_end);
   uint64_t t0 = get_ticks();

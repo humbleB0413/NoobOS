@@ -9,7 +9,7 @@ INC_DIR   := include
 BUILD_DIR := build
 
 # Add new subsystem directories here (e.g. fs, ipc, arch/x86)
-SRC_DIRS  := . boot kernel driver lib mm
+SRC_DIRS  := . boot kernel driver lib mm fs
 
 # ── Build mode ─────────────────────────────────────────────────────────────────
 # Usage: make          → debug build
@@ -41,6 +41,12 @@ LIBGCC  := $(shell $(CC) -print-libgcc-file-name)
 OBJ_DIR := $(BUILD_DIR)/$(MODE)
 KERNEL  := $(OBJ_DIR)/kernel.elf
 
+# initrd: rootfs/ 내용을 ustar 아카이브로 묶어 Multiboot 모듈로 넘긴다 (QEMU -initrd)
+ROOTFS_SRC   := rootfs
+ROOTFS_STAGE := $(OBJ_DIR)/rootfs
+INITRD       := $(OBJ_DIR)/initrd.tar
+ROOTFS_FILES := $(shell find $(ROOTFS_SRC) -type f 2>/dev/null)
+
 # ── Sources & objects ──────────────────────────────────────────────────────────
 C_SRCS  := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c))
 S_SRCS  := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.S))
@@ -58,13 +64,19 @@ DEPS := $(OBJS:.o=.d)
 
 # ── QEMU ───────────────────────────────────────────────────────────────────────
 QEMU      := qemu-system-i386
-QEMUFLAGS := -kernel $(KERNEL) -no-reboot
+QEMUFLAGS := -kernel $(KERNEL) -initrd $(INITRD) -no-reboot
 
 # ── Targets ────────────────────────────────────────────────────────────────────
 .PHONY: all run debug-qemu gdb clean info
 
-all: $(KERNEL)
+all: $(KERNEL) $(INITRD)
 	@echo "[$(MODE)] $(KERNEL) ready"
+
+$(INITRD): $(ROOTFS_FILES)
+	@rm -rf $(ROOTFS_STAGE)
+	@mkdir -p $(ROOTFS_STAGE)
+	cp -r $(ROOTFS_SRC)/. $(ROOTFS_STAGE)/
+	tar --format=ustar --owner=0 --group=0 -cf $@ -C $(ROOTFS_STAGE) .
 
 $(KERNEL): $(OBJS) linker.ld
 	$(LD) $(LDFLAGS) -o $@ $(OBJS) $(LIBGCC)

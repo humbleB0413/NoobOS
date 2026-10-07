@@ -64,6 +64,50 @@ ublob_badptr:
     int $0x80
 ublob_badptr_end:
 
+/* 6) open("/etc/motd") -> read -> write(stdout) -> close -> exit(읽은 바이트 수) */
+.global ublob_cat, ublob_cat_end
+ublob_cat:
+    call 1f
+1:  pop %ebp
+    sub $128, %esp
+    mov $SYS_OPEN, %eax
+    lea (motd_path - 1b)(%ebp), %ebx
+    int $0x80
+    mov %eax, %esi              /* fd */
+    mov $SYS_READ, %eax
+    mov %esi, %ebx
+    mov %esp, %ecx
+    mov $128, %edx
+    int $0x80
+    mov %eax, %edi              /* 읽은 길이 */
+    mov $SYS_WRITE, %eax
+    mov $1, %ebx
+    mov %esp, %ecx
+    mov %edi, %edx
+    int $0x80
+    mov $SYS_CLOSE, %eax
+    mov %esi, %ebx
+    int $0x80
+    mov $SYS_EXIT, %eax
+    mov %edi, %ebx
+    int $0x80
+motd_path: .asciz "/etc/motd"
+ublob_cat_end:
+
+/* 7) 없는 파일 open -> E_NOENT 를 종료 코드로 */
+.global ublob_noent, ublob_noent_end
+ublob_noent:
+    call 1f
+1:  pop %ebp
+    mov $SYS_OPEN, %eax
+    lea (noent_path - 1b)(%ebp), %ebx
+    int $0x80
+    mov %eax, %ebx
+    mov $SYS_EXIT, %eax
+    int $0x80
+noent_path: .asciz "/no/such/file"
+ublob_noent_end:
+
 /* 5) 무한 루프 — 타이머 선점으로 다른 프로세스가 계속 돌고, kill 로 끝낼 수 있어야 함 */
 .global ublob_spin, ublob_spin_end
 ublob_spin:

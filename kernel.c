@@ -18,6 +18,7 @@ int kernel_main(unsigned long magic, unsigned long addr){
     init_double_fault_task();
     init_syscall();
     init_scheduling();
+    init_initrd(addr);
     kprintf("NoobOS: boot complete\n");
 
     char keyboard_input = '\0';

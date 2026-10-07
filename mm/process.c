@@ -172,6 +172,10 @@ process_t* create_user_process(const char* name, address_space_t* as, uint32_t e
     return proc;
 }
 
+process_t* process_current(void){
+    return &processes[current];
+}
+
 address_space_t* process_current_as(void){
     return processes[current].as;
 }

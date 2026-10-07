@@ -75,6 +75,8 @@ void kfree(void *address);
 void *kmalloc_page(uint32_t *phys_out);
 void kfree_page(void *page);
 
+/* 이미 존재하는 물리 메모리(부트 모듈 등)를 커널 힙 가상 주소에 매핑한다. 해제하지 않는다 */
+void *vmm_map_physical(uint32_t phys, uint32_t size);
 uint32_t vmm_kernel_cr3(void);
 address_space_t *vmm_create_address_space(void);
 void vmm_destroy_address_space(address_space_t *as);

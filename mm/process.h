@@ -6,6 +6,9 @@
 #define PROCESS_NAME_LEN 16
 /* 타이머 tick(1ms) 몇 번마다 다음 프로세스로 넘길지 */
 #define PROCESS_QUANTUM_TICKS 10
+/* fd 0~2 는 콘솔로 예약, 3 부터 파일 */
+#define PROCESS_MAX_FILES 8
+#define PROCESS_FIRST_FILE_FD 3
 
 /* 프로세스 상태 */
 #define PROCESS_UNUSED 0   /* 빈 슬롯 */
@@ -15,6 +18,7 @@
 #include <stdint.h>
 #include "list.h"
 #include "vmm.h"
+#include "../fs/vfs.h"
 
 /* process_wait() 이 돌려주는 특수 종료 코드 */
 #define PROCESS_EXIT_KILLED  (-9)    /* kill 로 종료 */
@@ -38,6 +42,10 @@ typedef struct __attribute__((aligned(4096)))
     char name[PROCESS_NAME_LEN];
     address_space_t* as;                /* 유저 프로세스의 주소 공간, 커널 프로세스는 NULL */
     uint32_t cr3;                       /* 전환 시 로드할 페이지 디렉터리 물리 주소 */
+    struct {
+        vfs_node_t* node;               /* NULL 이면 빈 fd */
+        uint32_t offset;
+    } files[PROCESS_MAX_FILES];
 } process_t;
 
 /* 인터럽트 진입 시 스택에 쌓이는 trap frame (linux/idt.h 의 pt_regs 와 동일한 배치) */
@@ -73,6 +81,7 @@ process_t* create_process(uint32_t pc, const char* name);
 /* as 를 넘겨받아 ring3 의 entry 에서 user_esp 스택으로 시작한다. 실패 시 NULL (as 는 호출자가 정리) */
 process_t* create_user_process(const char* name, address_space_t* as, uint32_t entry, uint32_t user_esp);
 address_space_t* process_current_as(void);
+process_t* process_current(void);
 void yield(void);
 /* 타이머 IRQ 가 매 tick(EOI 이후) 호출 — CPU 시간 집계 + quantum 이 끝나면 yield */
 void schedule_tick(void);

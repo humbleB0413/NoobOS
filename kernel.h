@@ -19,6 +19,7 @@
 #include "mm/pmm.h"
 #include "mm/vmm.h"
 #include "mm/process.h"
+#include "fs/vfs.h"
 #include "multiboot.h"
 #include "kstd.h"
 #include "list.h"

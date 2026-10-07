@@ -7,6 +7,15 @@
 static uint32_t pmm_bitmap[PMM_MAX_FRAME_SIZE / 32];
 extern char _end;
 
+/* [start, end) 를 덮는 모든 프레임을 사용 중으로 표시 */
+static void reserve_range(uint32_t start, uint32_t end) {
+  for (uint32_t frame = start / PAGE_SIZE; frame < (end + PAGE_SIZE - 1) / PAGE_SIZE; frame++) {
+    if (frame < PMM_MAX_FRAME_SIZE) {
+      pmm_bitmap[frame / 32] |= (1u << (frame % 32));
+    }
+  }
+}
+
 void init_pmm(unsigned long mbi_address) {
   // bitmap 초기화
   memset(pmm_bitmap, 0xFF, sizeof(pmm_bitmap));
@@ -28,17 +37,17 @@ void init_pmm(unsigned long mbi_address) {
                                       sizeof(mmap->size));
   }
 
-  for (uint32_t m = 0x100000; m < (uint32_t)&_end; m += PAGE_SIZE) {
-    uint32_t current_page = m >> 12;
-    if (current_page < PMM_MAX_FRAME_SIZE) {
-      pmm_bitmap[current_page / 32] |= (1u << (current_page % 32));
-    }
-  }
+  reserve_range(0x100000, (uint32_t)&_end);
 
-  for (uint32_t vga_mem = 0xA0000; vga_mem < 0x100000; vga_mem += PAGE_SIZE) {
-    uint32_t current_page = vga_mem >> 12;
-    if (current_page < PMM_MAX_FRAME_SIZE) {
-      pmm_bitmap[current_page / 32] |= (1u << (current_page % 32));
+  /* 첫 1MB 전체(BIOS 데이터, Multiboot 정보 구조체, VGA 메모리 0xA0000~)를 사용 중으로 둔다.
+   * Multiboot 정보는 부팅 후에도(initrd 위치 등) 읽어야 하므로 프레임이 재사용되면 안 된다 */
+  reserve_range(0, 0x100000);
+
+  /* 부트 모듈(initrd)은 커널 뒤 어딘가에 올라와 있는데 mmap 에는 그냥 AVAILABLE 로 보고된다 */
+  if (mbi->flags & MULTIBOOT_INFO_MODS) {
+    multiboot_module_t *mods = (multiboot_module_t *)mbi->mods_addr;
+    for (uint32_t i = 0; i < mbi->mods_count; i++) {
+      reserve_range(mods[i].mod_start, mods[i].mod_end);
     }
   }
 

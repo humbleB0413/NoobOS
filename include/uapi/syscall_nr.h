@@ -11,6 +11,9 @@
 #define SYS_SLEEP   4   /* sleep(ms)                   */
 #define SYS_YIELD   5   /* yield()                     */
 #define SYS_UPTIME  6   /* uptime()                    — 부팅 후 ms */
+#define SYS_OPEN    7   /* open(path)                  — 읽기 전용, fd(3 이상) 반환 */
+#define SYS_CLOSE   8   /* close(fd)                   */
+#define SYS_READDIR 9   /* readdir(index, buf, len)    — index 번째 항목 경로를 buf 에, 반환: 1=파일 2=디렉터리, 끝이면 0 */
 
 #define SYSCALL_VECTOR 0x80
 
@@ -18,3 +21,5 @@
 #define E_BADF   (-9)   /* 잘못된 파일 디스크립터 */
 #define E_NOSYS  (-38)  /* 없는 시스템 콜 */
 #define E_INVAL  (-22)
+#define E_NOENT  (-2)   /* 없는 파일 */
+#define E_MFILE  (-24)  /* 열 수 있는 파일 수 초과 */
