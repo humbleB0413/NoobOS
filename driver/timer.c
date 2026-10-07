@@ -1,6 +1,7 @@
 #include "timer.h"
 #include "linux/irq.h"
 #include "../driver/pic.h"
+#include "../mm/process.h"
 
 extern __attribute__((aligned(0x10))) idtr_t KERNEL_IDT[IDT_ENTRIES_SIZE];
 extern void irq_system_timer(void);
@@ -27,6 +28,7 @@ void irq_pic_timer(pt_regs* regs){
     uint8_t irq = (uint8_t)(regs->int_no - IRQ_BASE);
     SYSTEM_TIMER += 1;
     pic_send_eoi(irq);
+    yield();
 }
 
 static inline uint64_t ms_to_ticks(uint64_t ms){

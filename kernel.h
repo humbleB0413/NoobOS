@@ -11,6 +11,7 @@
 #include "driver/keyboard.h"
 #include "mm/pmm.h"
 #include "mm/vmm.h"
+#include "mm/process.h"
 #include "multiboot.h"
 
 #endif

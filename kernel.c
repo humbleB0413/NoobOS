@@ -13,6 +13,7 @@ int kernel_main(unsigned long magic, unsigned long addr){
     init_keyboard();
     init_pmm(addr);
     init_vmm();
+    init_scheduling();
 
     char keyboard_input = '\0';
     allocated_frame_info_t alloc_info = {0};
