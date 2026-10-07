@@ -74,6 +74,10 @@ DEPS := $(OBJS:.o=.d)
 # ── QEMU ───────────────────────────────────────────────────────────────────────
 QEMU      := qemu-system-i386
 QEMUFLAGS := -kernel $(KERNEL) -initrd $(INITRD) -no-reboot
+# make run DISK=disk.img  → primary master ATA 디스크로 붙인다 (셸의 disk 명령)
+ifneq ($(DISK),)
+QEMUFLAGS += -drive file=$(DISK),format=raw,if=ide,index=0
+endif
 
 # ── Targets ────────────────────────────────────────────────────────────────────
 .PHONY: all run debug-qemu gdb clean info

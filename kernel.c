@@ -19,6 +19,7 @@ int kernel_main(unsigned long magic, unsigned long addr){
     init_syscall();
     init_scheduling();
     init_initrd(addr);
+    init_ata();
     kprintf("NoobOS: boot complete\n");
 
     /* 셸을 별도 커널 프로세스로 띄우고, 셸이 끝나면(exit) 새로 띄운다 */

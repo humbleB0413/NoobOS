@@ -8,6 +8,7 @@
 #include "port_io.h"
 #include "../driver/keyboard.h"
 #include "../driver/rtc.h"
+#include "../driver/ata.h"
 #include "../driver/timer.h"
 #include "../fs/vfs.h"
 #include "../mm/pmm.h"
@@ -217,6 +218,47 @@ static void cmd_reboot(int argc, char **argv) {
   while (1) __asm__ volatile("hlt");
 }
 
+/* disk          — 디스크 정보
+ * disk read N   — N 번 섹터를 16진수로 덤프
+ * disk write N text — N 번 섹터 앞부분에 text 를 쓴다 (나머지는 0) */
+static void cmd_disk(int argc, char **argv) {
+  const ata_drive_t *d = ata_drive();
+  if (!d->present) {
+    kprintf("disk: no ATA drive on the primary bus (run QEMU with -hda <image>)\n");
+    return;
+  }
+  if (argc < 3) {
+    kprintf("  primary master: \"%s\", %u sectors (%u MB)\n", d->model, d->sectors, d->sectors / 2048);
+    return;
+  }
+  uint32_t lba = strtoul(argv[2], 0, 0);
+  uint8_t sector[ATA_SECTOR_SIZE];
+  if (strcmp(argv[1], "write") == 0) {
+    memset(sector, 0, sizeof(sector));
+    for (int i = 3, o = 0; i < argc; i++) {
+      for (const char *p = argv[i]; *p && o < ATA_SECTOR_SIZE - 1; p++) sector[o++] = (uint8_t)*p;
+      if (i + 1 < argc && o < ATA_SECTOR_SIZE - 1) sector[o++] = ' ';
+    }
+    kprintf(ata_write(lba, 1, sector) == 0 ? "  wrote sector %u\n" : "  write of sector %u failed\n", lba);
+    return;
+  }
+  if (ata_read(lba, 1, sector) < 0) {
+    kprintf("  read of sector %u failed\n", lba);
+    return;
+  }
+  /* 앞 128 바이트만: 16 바이트씩 hex + ASCII */
+  for (int row = 0; row < 8; row++) {
+    kprintf("  %03x:", row * 16);
+    for (int i = 0; i < 16; i++) kprintf(" %02x", sector[row * 16 + i]);
+    kprintf("  ");
+    for (int i = 0; i < 16; i++) {
+      uint8_t c = sector[row * 16 + i];
+      kprintf("%c", isprint(c) ? c : '.');
+    }
+    kprintf("\n");
+  }
+}
+
 #ifdef DEBUG
 static void cmd_selftest(int argc, char **argv) {
   const char *which = argc > 1 ? argv[1] : "all";
@@ -240,6 +282,7 @@ static const command_t commands[] = {
     {"uptime", "uptime", "time since boot", cmd_uptime},
     {"date", "date", "RTC date and time", cmd_date},
     {"sleep", "sleep [ms]", "sleep (default 1000 ms)", cmd_sleep},
+    {"disk", "disk [read|write N [text]]", "ATA disk info / sector I/O", cmd_disk},
 #ifdef DEBUG
     {"selftest", "selftest [lib|user|kmalloc]", "run in-kernel tests", cmd_selftest},
 #endif
