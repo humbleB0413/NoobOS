@@ -7,6 +7,7 @@
 #include "../mm/pmm.h"
 #include "uapi/syscall_nr.h"
 #include "../fs/vfs.h"
+#include "linux/exec.h"
 
 #define UBLOB(name) extern const char ublob_##name[], ublob_##name##_end[]
 UBLOB(hello);
@@ -64,6 +65,11 @@ int usermode_selftest(void) {
 
   pid = spawn_blob("u-noent", ublob_noent, ublob_noent_end);
   pass &= check("open of a missing file -> E_NOENT", pid && process_wait(pid) == E_NOENT);
+
+  int epid = exec_user("/bin/echo", "echo   ELF loader: argv works");
+  pass &= check("exec ELF /bin/echo with arguments", epid > 0 && process_wait((uint32_t)epid) == 0);
+  pass &= check("exec of a non-ELF file -> E_INVAL", exec_user("/etc/motd", 0) == E_INVAL);
+  pass &= check("exec of a missing file -> E_NOENT", exec_user("/bin/nope", 0) == E_NOENT);
 
   pid = spawn_blob("u-spin", ublob_spin, ublob_spin_end);
   uint64_t t0 = get_ticks();

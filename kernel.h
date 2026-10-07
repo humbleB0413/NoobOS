@@ -10,6 +10,7 @@
 #include "linux/console.h"
 #include "linux/syscall.h"
 #include "linux/user_selftest.h"
+#include "linux/exec.h"
 #include "linux/irq.h"
 #include "driver/pic.h"
 #include "driver/timer.h"

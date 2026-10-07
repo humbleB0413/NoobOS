@@ -13,6 +13,8 @@
 #define SYS_UPTIME  6   /* uptime()                    — 부팅 후 ms */
 #define SYS_OPEN    7   /* open(path)                  — 읽기 전용, fd(3 이상) 반환 */
 #define SYS_CLOSE   8   /* close(fd)                   */
+#define SYS_SPAWN   10  /* spawn(path, argline)         — ELF 를 새 프로세스로 실행, pid 반환 */
+#define SYS_WAIT    11  /* wait(pid)                   — 끝날 때까지 기다린 뒤 종료 코드 반환 */
 #define SYS_READDIR 9   /* readdir(index, buf, len)    — index 번째 항목 경로를 buf 에, 반환: 1=파일 2=디렉터리, 끝이면 0 */
 
 #define SYSCALL_VECTOR 0x80

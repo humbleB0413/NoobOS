@@ -5,6 +5,7 @@
 #include "../driver/timer.h"
 #include "../fs/vfs.h"
 #include "string.h"
+#include "linux/exec.h"
 
 extern __attribute__((aligned(0x10))) idtr_t KERNEL_IDT[IDT_ENTRIES_SIZE];
 extern void asm_syscall(void);
@@ -70,6 +71,24 @@ static int sys_readdir(uint32_t index, uint32_t ubuf, uint32_t len) {
   return (int)node->type;
 }
 
+static int sys_spawn(uint32_t upath, uint32_t uargline) {
+  char path[VFS_NAME_MAX + 1];
+  char argline[EXEC_ARGLINE_MAX];
+  int r = copy_user_string(path, upath, sizeof(path));
+  if (r < 0) return r;
+  argline[0] = '\0';
+  if (uargline) {
+    r = copy_user_string(argline, uargline, sizeof(argline));
+    if (r < 0) return r;
+  }
+  return exec_user(path, argline);
+}
+
+static int sys_wait(uint32_t pid) {
+  if (pid == process_getpid()) return E_INVAL;
+  return process_wait(pid);
+}
+
 static int sys_write(uint32_t fd, uint32_t buf, uint32_t len) {
   if (fd != 1 && fd != 2) return E_BADF;
   if (!user_buffer_ok(buf, len, 0)) return E_FAULT;
@@ -127,6 +146,12 @@ void syscall_dispatch(pt_regs *regs) {
       break;
     case SYS_CLOSE:
       ret = sys_close(regs->ebx);
+      break;
+    case SYS_SPAWN:
+      ret = sys_spawn(regs->ebx, regs->ecx);
+      break;
+    case SYS_WAIT:
+      ret = sys_wait(regs->ebx);
       break;
     case SYS_READDIR:
       ret = sys_readdir(regs->ebx, regs->ecx, regs->edx);

@@ -47,6 +47,15 @@ ROOTFS_STAGE := $(OBJ_DIR)/rootfs
 INITRD       := $(OBJ_DIR)/initrd.tar
 ROOTFS_FILES := $(shell find $(ROOTFS_SRC) -type f 2>/dev/null)
 
+# ── User programs (ring 3) ─────────────────────────────────────────────────────
+# user/bin/<name>.c 하나가 /bin/<name> 실행 파일 하나. 커널과 별개로 user/linker.ld 로 링크한다
+USER_CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-builtin -fno-stack-protector \
+               -fno-pie -Wall -Wextra -O2 -g -Iinclude -Iuser/lib -MMD -MP
+USER_LIB    := $(OBJ_DIR)/user/lib/crt0.o $(OBJ_DIR)/user/lib/ulib.o
+USER_PROGS  := $(patsubst user/bin/%.c,%,$(wildcard user/bin/*.c))
+USER_BINS   := $(addprefix $(OBJ_DIR)/user/bin/,$(USER_PROGS))
+DEPS_USER   := $(USER_LIB:.o=.d) $(addsuffix .d,$(USER_BINS))
+
 # ── Sources & objects ──────────────────────────────────────────────────────────
 C_SRCS  := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c))
 S_SRCS  := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.S))
@@ -72,10 +81,22 @@ QEMUFLAGS := -kernel $(KERNEL) -initrd $(INITRD) -no-reboot
 all: $(KERNEL) $(INITRD)
 	@echo "[$(MODE)] $(KERNEL) ready"
 
-$(INITRD): $(ROOTFS_FILES)
+$(OBJ_DIR)/user/%.o: user/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/user/%.o: user/%.S
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/user/bin/%: $(OBJ_DIR)/user/bin/%.o $(USER_LIB) user/linker.ld
+	$(LD) -T user/linker.ld -nostdlib -o $@ $(USER_LIB) $< $(LIBGCC)
+
+$(INITRD): $(ROOTFS_FILES) $(USER_BINS)
 	@rm -rf $(ROOTFS_STAGE)
-	@mkdir -p $(ROOTFS_STAGE)
+	@mkdir -p $(ROOTFS_STAGE)/bin
 	cp -r $(ROOTFS_SRC)/. $(ROOTFS_STAGE)/
+	@for b in $(USER_BINS); do $(OBJCOPY) --strip-debug $$b $(ROOTFS_STAGE)/bin/$$(basename $$b); done
 	tar --format=ustar --owner=0 --group=0 -cf $@ -C $(ROOTFS_STAGE) .
 
 $(KERNEL): $(OBJS) linker.ld
@@ -117,6 +138,7 @@ info:
 	@echo "CFLAGS   : $(CFLAGS)"
 	@echo "C_SRCS   : $(C_SRCS)"
 	@echo "S_SRCS   : $(S_SRCS)"
+	@echo "USER     : $(USER_PROGS)"
 
 # Auto-generated header dependency rules
--include $(DEPS)
+-include $(DEPS) $(DEPS_USER)
