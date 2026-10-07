@@ -43,3 +43,4 @@
 
 void init_trap();
 void exception_handler(pt_regs* regs);
+const char* exception_name(uint32_t int_no);

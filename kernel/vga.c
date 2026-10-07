@@ -139,10 +139,8 @@ static void kprint_uint(unsigned long n, int base, int uppercase)
         terminal_putchar(buf[--i]);
 }
 
-void kprintf(const char *fmt, ...)
+void kvprintf(const char *fmt, va_list ap)
 {
-    va_list ap;
-    va_start(ap, fmt);
 
     while (*fmt) {
         if (*fmt != '%') {
@@ -227,6 +225,12 @@ void kprintf(const char *fmt, ...)
 
         fmt++;
     }
+}
 
+void kprintf(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    kvprintf(fmt, ap);
     va_end(ap);
 }

@@ -12,6 +12,7 @@ int kernel_main(unsigned long magic, unsigned long addr){
     __asm__ volatile ("sti");
     init_timer();
     init_keyboard();
+    KASSERT(magic == MULTIBOOT_BOOTLOADER_MAGIC);
     init_pmm(addr);
     init_vmm();
     init_scheduling();

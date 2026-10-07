@@ -3,6 +3,7 @@
 #include "string.h"
 #include "linux/irq.h"
 #include "linux/trap.h"
+#include "linux/panic.h"
 
 #define PMM_ERROR_CODE 0xFFFFFFFF
 
@@ -168,12 +169,11 @@ static void set_pt_entry(page_t* pt, uint32_t address, uint32_t attribute){
 void isr_page_fault(pt_regs* pt){
   uint32_t fault_addr;
   __asm__ volatile("mov %%cr2, %0" : "=r"(fault_addr));
-  kprintf("Page Fault at 0x%x (err=0x%x, %s, %s, %s)\n",
-        fault_addr, pt->err_code,
+  kpanic_regs(pt, "Page Fault at 0x%x (%s, %s, %s)",
+        fault_addr,
         (pt->err_code & 0x1) ? "protection" : "not-present",
         (pt->err_code & 0x2) ? "write" : "read",
         (pt->err_code & 0x4) ? "user" : "kernel");
-  while(1);
 }
 
 #ifdef DEBUG

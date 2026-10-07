@@ -1,22 +1,40 @@
 #include "linux/trap.h"
 #include "linux/vga.h"
+#include "linux/panic.h"
 
 extern __attribute__((aligned(0x10))) idtr_t KERNEL_IDT[IDT_ENTRIES_SIZE];
 extern void *intel_isr_stub_table[32];
 
-static char* intel_exception_message[32] = {
-    [0]  = "Divide by Zero\n",
-    [1]  = "Debug\n",
-    [2]  = "NMI\n",
-    [3]  = "Breakpoint\n",
-    [4]  = "Overflow\n",
-    [5]  = "Bound Range Exceeded\n",
-    [6]  = "Invalid Opcode\n",
-    [7]  = "Device Not Available\n",
-    [8]  = "Double Fault\n",
-    [13] = "General Protection Fault\n",
-    [14] = "Page Fault\n",
+static const char* intel_exception_message[32] = {
+    [ISR_DIVIDE_ERROR]          = "Divide by Zero",
+    [ISR_DEBUG]                 = "Debug",
+    [ISR_NMI]                   = "NMI",
+    [ISR_BREAKPOINT]            = "Breakpoint",
+    [ISR_OVERFLOW]              = "Overflow",
+    [ISR_BOUND_RANGE]           = "Bound Range Exceeded",
+    [ISR_INVALID_OPCODE]        = "Invalid Opcode",
+    [ISR_DEVICE_NOT_AVAILABLE]  = "Device Not Available",
+    [ISR_DOUBLE_FAULT]          = "Double Fault",
+    [ISR_COPROCESSOR_OVERRUN]   = "Coprocessor Segment Overrun",
+    [ISR_INVALID_TSS]           = "Invalid TSS",
+    [ISR_SEGMENT_NOT_PRESENT]   = "Segment Not Present",
+    [ISR_STACK_SEGMENT_FAULT]   = "Stack-Segment Fault",
+    [ISR_GENERAL_PROTECTION]    = "General Protection Fault",
+    [ISR_PAGE_FAULT]            = "Page Fault",
+    [ISR_FPU_ERROR]             = "x87 FPU Error",
+    [ISR_ALIGNMENT_CHECK]       = "Alignment Check",
+    [ISR_MACHINE_CHECK]         = "Machine Check",
+    [ISR_SIMD_FP_EXCEPTION]     = "SIMD FP Exception",
+    [ISR_VIRTUALIZATION]        = "Virtualization Exception",
+    [ISR_CONTROL_PROTECTION]    = "Control Protection Exception",
 };
+
+const char* exception_name(uint32_t int_no){
+    if(int_no < 32 && intel_exception_message[int_no]){
+        return intel_exception_message[int_no];
+    }
+    return "Reserved Exception";
+}
 
 void init_trap(){
     __asm__ volatile ("cli");// 안정성 보장
@@ -25,44 +43,7 @@ void init_trap(){
     }
 }
 
+/* 예외 후 그냥 iret 하면 같은 명령을 다시 실행해 무한 반복되므로, 지금은 전부 패닉으로 처리한다 */
 void exception_handler(pt_regs* regs){
-    switch (regs->int_no)
-    {
-    case ISR_DIVIDE_ERROR:
-        kprintf(intel_exception_message[ISR_DIVIDE_ERROR]);
-        break;
-    case ISR_DEBUG:
-        kprintf(intel_exception_message[ISR_DEBUG]);
-        break;
-    case ISR_NMI:
-        kprintf(intel_exception_message[ISR_NMI]);
-        break;
-    case ISR_BREAKPOINT:
-        kprintf(intel_exception_message[ISR_BREAKPOINT]);
-        break;
-    case ISR_OVERFLOW:
-        kprintf(intel_exception_message[ISR_OVERFLOW]);
-        break;
-    case ISR_BOUND_RANGE:
-        kprintf(intel_exception_message[ISR_BOUND_RANGE]);
-        break;
-    case ISR_INVALID_OPCODE:
-        kprintf(intel_exception_message[ISR_INVALID_OPCODE]);
-        break;
-    case ISR_DEVICE_NOT_AVAILABLE:
-        kprintf(intel_exception_message[ISR_DEVICE_NOT_AVAILABLE]);
-        break;
-    case ISR_DOUBLE_FAULT:
-        kprintf(intel_exception_message[ISR_DOUBLE_FAULT]);
-        break;
-    case ISR_GENERAL_PROTECTION:
-        kprintf(intel_exception_message[ISR_GENERAL_PROTECTION]);
-        break;
-    case ISR_PAGE_FAULT:
-        kprintf(intel_exception_message[ISR_PAGE_FAULT]);
-        break;
-    default:
-        kprintf("Extra Error!\n");
-        break;
-    }
+    kpanic_regs(regs, "%s exception", exception_name(regs->int_no));
 }
