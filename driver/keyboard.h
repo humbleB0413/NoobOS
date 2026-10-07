@@ -50,6 +50,9 @@
 #define KEY_INSERT    0x88
 #define KEY_DELETE    0x89
 
+/* Ctrl+C — 셸이 포그라운드 프로그램을 끝내는 데 쓴다 */
+#define KEY_CTRL_C    0x03
+
 /*
  * head = 다음에 읽을 위치, tail = 다음에 쓸 위치. 둘 다 감싸지 않고 계속 증가시키며
  * (tail - head) 가 들어 있는 키 개수다 — unsigned 오버플로가 나도 차이는 그대로 맞는다.

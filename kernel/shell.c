@@ -101,6 +101,7 @@ static void cmd_help(int argc, char **argv) {
     kprintf("  %-28s %s\n", c->usage, c->help);
   }
   kprintf("Anything else runs /bin/<name> in ring 3; append '&' to run it in the background.\n");
+  kprintf("Ctrl+C stops the foreground program, Up/Down recall history.\n");
 }
 
 static void cmd_clear(int argc, char **argv) {
@@ -332,6 +333,15 @@ static void run_program(int argc, char **argv) {
   if (background) {
     kprintf("[%d] started in background\n", pid);
     return;
+  }
+  /* 기다리는 동안 Ctrl+C 가 오면 포그라운드 프로그램을 끝낸다 */
+  while (process_alive((uint32_t)pid)) {
+    if (console_take_interrupt()) {
+      kprintf("^C\n");
+      process_kill((uint32_t)pid);
+      break;
+    }
+    process_sleep(10);
   }
   int code = process_wait((uint32_t)pid);
   if (code == PROCESS_EXIT_FAULT) kprintf("[%d] terminated by a fault\n", pid);

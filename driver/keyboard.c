@@ -64,25 +64,61 @@ static void keyboard_push(uint8_t key){
   KEYBOARD_INPUT.tail++;
 }
 
+/* 수식 키 상태. 좌우 Shift 를 따로 기억해야 한쪽을 뗐을 때 다른 쪽이 눌린 상태를 잃지 않는다 */
+#define MOD_LSHIFT 0x01
+#define MOD_RSHIFT 0x02
+#define MOD_CTRL   0x04   /* 좌/우(E0 1D) 공통 */
+#define MOD_ALT    0x08   /* 좌/우(E0 38, AltGr) 공통 */
+static uint8_t modifiers = 0;
+static int caps_lock = 0;
+
+static void set_modifier(uint8_t bit, int released){
+  if(released) modifiers &= ~bit;
+  else modifiers |= bit;
+}
+
 void irq_keyboard(pt_regs* regs) {
   uint8_t irq = (uint8_t)(regs->int_no - IRQ_BASE);
 
   uint8_t scan_code = inb(KEYBOARD_DATA_PORT);
 
   static int extended = 0;
-  static int shift_pressed = 0;
+  /* Pause 키는 E1 1D 45 E1 9D C5 를 보낸다 — E1 뒤 두 바이트는 키가 아니므로 건너뛴다 */
+  static int skip = 0;
 
-  if (scan_code == 0xE0) {
+  if (skip > 0) {
+    skip--;
+  } else if (scan_code == 0xE1) {
+    skip = 2;
+  } else if (scan_code == 0xE0) {
     extended = 1;
   } else {
     int released = scan_code & 0x80;  // MSB=1 → 뗌(break)
     uint8_t code = scan_code & 0x7F;
 
-    if(code == 0x2A || code == 0x36){
-      shift_pressed = !released;
-    }
-    if (!released) {
-      uint8_t key = scancode_to_ascii(code, shift_pressed, extended);
+    if (extended && (code == 0x2A || code == 0x36)) {
+      /* PrintScreen 등이 앞뒤로 붙이는 가짜 Shift(E0 2A / E0 AA) — 실제 Shift 상태를 건드리지 않는다 */
+    } else if (code == 0x2A) {
+      set_modifier(MOD_LSHIFT, released);
+    } else if (code == 0x36) {
+      set_modifier(MOD_RSHIFT, released);
+    } else if (code == 0x1D) {
+      set_modifier(MOD_CTRL, released);
+    } else if (code == 0x38) {
+      set_modifier(MOD_ALT, released);
+    } else if (code == 0x3A) {
+      if (!released) caps_lock = !caps_lock;
+    } else if (!released) {
+      int shift = (modifiers & (MOD_LSHIFT | MOD_RSHIFT)) != 0;
+      uint8_t key = scancode_to_ascii(code, shift, extended);
+      /* Caps Lock 은 글자에만 적용(Shift 와 함께면 다시 소문자) */
+      if (caps_lock && key < 0x80 && ((key >= 'a' && key <= 'z') || (key >= 'A' && key <= 'Z'))) {
+        key ^= 0x20;
+      }
+      /* Ctrl+글자 → 제어 문자 (Ctrl+C = 0x03) */
+      if ((modifiers & MOD_CTRL) && key < 0x80 && ((key | 0x20) >= 'a' && (key | 0x20) <= 'z')) {
+        key = (uint8_t)((key | 0x20) - 'a' + 1);
+      }
       if (key != '\0') {
         keyboard_push(key);
       }
