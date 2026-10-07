@@ -1,6 +1,7 @@
 #include "linux/trap.h"
 #include "linux/vga.h"
 #include "linux/panic.h"
+#include "../mm/process.h"
 
 extern __attribute__((aligned(0x10))) idtr_t KERNEL_IDT[IDT_ENTRIES_SIZE];
 extern void *intel_isr_stub_table[32];
@@ -45,5 +46,10 @@ void init_trap(){
 
 /* 예외 후 그냥 iret 하면 같은 명령을 다시 실행해 무한 반복되므로, 지금은 전부 패닉으로 처리한다 */
 void exception_handler(pt_regs* regs){
+    if(regs->cs & 0x3){
+        /* 유저 프로그램의 잘못은 커널 전체가 아니라 그 프로세스만 끝낸다 */
+        kprintf("[pid %u] %s at eip=0x%x - killed\n", process_getpid(), exception_name(regs->int_no), regs->eip);
+        process_exit(PROCESS_EXIT_FAULT);
+    }
     kpanic_regs(regs, "%s exception", exception_name(regs->int_no));
 }

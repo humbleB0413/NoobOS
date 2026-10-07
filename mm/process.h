@@ -14,6 +14,12 @@
 
 #include <stdint.h>
 #include "list.h"
+#include "vmm.h"
+
+/* process_wait() 이 돌려주는 특수 종료 코드 */
+#define PROCESS_EXIT_KILLED  (-9)    /* kill 로 종료 */
+#define PROCESS_EXIT_FAULT   (-11)   /* 유저 모드 예외(#PF, #GP 등)로 종료 */
+#define PROCESS_EXIT_UNKNOWN (-128)  /* 종료 기록이 이미 덮어써짐 */
 
 /*
  * 페이지 정렬된 구조체 맨 앞에 가드 페이지(매핑 해제)와 커널 스택을 둔다. 스택은 아래로 자라므로
@@ -30,6 +36,8 @@ typedef struct __attribute__((aligned(4096)))
     uint64_t cpu_ticks;                 /* 이 프로세스가 실행 중일 때 지나간 타이머 tick 수 */
     list_node_t sleep_node;             /* wake_tick 오름차순 sleep_queue 연결 */
     char name[PROCESS_NAME_LEN];
+    address_space_t* as;                /* 유저 프로세스의 주소 공간, 커널 프로세스는 NULL */
+    uint32_t cr3;                       /* 전환 시 로드할 페이지 디렉터리 물리 주소 */
 } process_t;
 
 /* 인터럽트 진입 시 스택에 쌓이는 trap frame (linux/idt.h 의 pt_regs 와 동일한 배치) */
@@ -62,6 +70,9 @@ typedef struct{
 
 void init_scheduling(void);
 process_t* create_process(uint32_t pc, const char* name);
+/* as 를 넘겨받아 ring3 의 entry 에서 user_esp 스택으로 시작한다. 실패 시 NULL (as 는 호출자가 정리) */
+process_t* create_user_process(const char* name, address_space_t* as, uint32_t entry, uint32_t user_esp);
+address_space_t* process_current_as(void);
 void yield(void);
 /* 타이머 IRQ 가 매 tick(EOI 이후) 호출 — CPU 시간 집계 + quantum 이 끝나면 yield */
 void schedule_tick(void);
@@ -69,12 +80,12 @@ int scheduler_running(void);
 
 uint32_t process_getpid(void);
 void process_sleep(uint32_t ms);
-__attribute__((noreturn)) void process_exit(void);
+__attribute__((noreturn)) void process_exit(int code);
 /* 0 성공, -1 없는 pid 이거나 죽일 수 없는 프로세스(pid 0 / idle) */
 int process_kill(uint32_t pid);
 int process_alive(uint32_t pid);
-/* pid 가 끝날 때까지 잠들며 기다린다 */
-void process_wait(uint32_t pid);
+/* pid 가 끝날 때까지 잠들며 기다리고 종료 코드를 돌려준다 */
+int process_wait(uint32_t pid);
 int process_snapshot(process_info_t* out, int max);
 /* addr 가 어떤 프로세스의 스택 가드 페이지면 "pid N (name)" 문자열, 아니면 NULL */
 const char* process_guard_owner(uint32_t addr);

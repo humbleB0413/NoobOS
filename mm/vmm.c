@@ -5,6 +5,7 @@
 #include "linux/trap.h"
 #include "linux/panic.h"
 #include "linux/spinlock.h"
+#include "process.h"
 
 #define PMM_ERROR_CODE 0xFFFFFFFF
 
@@ -171,6 +172,164 @@ void kfree(void *address) {
   spin_unlock(&heap_lock);
 }
 
+static uint32_t entry_value(const page_t *e) {
+  return ((uint32_t)e->high_address << 16) |
+         ((uint32_t)e->avl_and_low_address << 8) | e->attribute;
+}
+
+void *kmalloc_page(uint32_t *phys_out) {
+  spin_lock(&heap_lock);
+  uint32_t index = heap_find_free_run(1);
+  allocated_frame_info_t frame;
+  if (index == PMM_ERROR_CODE || alloc_frame(1, &frame) == PMM_ERROR_CODE) {
+    spin_unlock(&heap_lock);
+    return 0;
+  }
+  uint32_t phys = frame.frames[0] * PAGE_SIZE;
+  set_pt_entry(&pmm.kernel_heap[index], phys, PAGE_PRESENT | PAGE_RW);
+  uint32_t vaddr = KERNEL_HEAP_VIRT_BASE + index * PAGE_SIZE;
+  invlpg(vaddr);
+  spin_unlock(&heap_lock);
+
+  memset((void *)vaddr, 0, PAGE_SIZE);
+  if (phys_out) *phys_out = phys;
+  return (void *)vaddr;
+}
+
+void kfree_page(void *page) {
+  if (!page) return;
+  spin_lock(&heap_lock);
+  heap_release_page(((uint32_t)page - KERNEL_HEAP_VIRT_BASE) / PAGE_SIZE);
+  spin_unlock(&heap_lock);
+}
+
+uint32_t vmm_kernel_cr3(void) {
+  return (uint32_t)pmm.kernel_pdt;
+}
+
+void vmm_switch(uint32_t cr3) {
+  uint32_t current;
+  __asm__ volatile("mov %%cr3, %0" : "=r"(current));
+  if (current != cr3) {
+    __asm__ volatile("mov %0, %%cr3" : : "r"(cr3) : "memory");
+  }
+}
+
+address_space_t *vmm_create_address_space(void) {
+  address_space_t *as = kmalloc(sizeof(address_space_t));
+  if (!as) return 0;
+  memset(as, 0, sizeof(*as));
+
+  as->pd = kmalloc_page(&as->pd_phys);
+  if (!as->pd) {
+    kfree(as);
+    return 0;
+  }
+  /* 유저 영역 PDE 는 비워 두고 커널 PDE 만 복사 */
+  for (uint32_t i = 0; i < 1024; i++) {
+    if (i * 0x400000u < USER_SPACE_BASE || i * 0x400000u >= USER_SPACE_TOP) {
+      as->pd[i] = pmm.kernel_pdt[i];
+    }
+  }
+  return as;
+}
+
+void vmm_destroy_address_space(address_space_t *as) {
+  if (!as) return;
+  for (uint32_t pde = 0; pde < 1024; pde++) {
+    page_t *pt = as->pt[pde];
+    if (!pt) continue;
+    for (uint32_t i = 0; i < 1024; i++) {
+      uint32_t value = entry_value(&pt[i]);
+      if (value & PAGE_PRESENT) {
+        allocated_frame_info_t frame = {0};
+        frame.count = 1;
+        frame.frames[0] = (value & PAGE_FRAME_MASK) / PAGE_SIZE;
+        free_frame(&frame);
+      }
+    }
+    kfree_page(pt);
+  }
+  kfree_page(as->pd);
+  kfree(as);
+}
+
+static page_t *user_pte(address_space_t *as, uint32_t vaddr, int create) {
+  uint32_t pde = vaddr >> 22;
+  if (!as->pt[pde]) {
+    if (!create) return 0;
+    uint32_t phys;
+    page_t *pt = kmalloc_page(&phys);
+    if (!pt) return 0;
+    as->pt[pde] = pt;
+    set_pdt_entry(&as->pd[pde], phys, PAGE_PRESENT | PAGE_RW | PAGE_US);
+  }
+  return &as->pt[pde][(vaddr >> 12) & 0x3FF];
+}
+
+int vmm_map_user_range(address_space_t *as, uint32_t vaddr, uint32_t size, int writable) {
+  if (size == 0) return 0;
+  uint32_t start = vaddr & PAGE_FRAME_MASK;
+  uint32_t end = vaddr + size;
+  if (start < USER_SPACE_BASE || end > USER_SPACE_TOP || end < vaddr) return -1;
+
+  /* 새 프레임을 0 으로 채우려면 유저 주소로 접근해야 하므로 잠시 as 의 CR3 로 전환한다.
+   * 커널 힙(유저 페이지 테이블이 있는 곳)은 모든 주소 공간에 같은 PDE 로 보이므로 PTE 수정에는 지장 없다 */
+  uint32_t flags = irq_save();
+  uint32_t saved, result = 0;
+  __asm__ volatile("mov %%cr3, %0" : "=r"(saved));
+  vmm_switch(as->pd_phys);
+
+  for (uint32_t page = start; page < end; page += PAGE_SIZE) {
+    page_t *pte = user_pte(as, page, 1);
+    if (!pte) { result = -1; break; }
+    uint32_t value = entry_value(pte);
+    if (value & PAGE_PRESENT) {
+      /* ELF 세그먼트끼리 한 페이지를 나눠 쓰는 경우: 이미 있으면 권한만 넓힌다 */
+      if (writable) set_pt_entry(pte, value & PAGE_FRAME_MASK, (value & 0xFFF) | PAGE_RW);
+      invlpg(page);
+      continue;
+    }
+    allocated_frame_info_t frame;
+    if (alloc_frame(1, &frame) == PMM_ERROR_CODE) { result = -1; break; }
+    set_pt_entry(pte, frame.frames[0] * PAGE_SIZE,
+                 PAGE_PRESENT | PAGE_US | (writable ? PAGE_RW : 0));
+    invlpg(page);
+    /* 재사용된 프레임에 이전 프로세스의 데이터가 남지 않도록 */
+    memset((void *)page, 0, PAGE_SIZE);
+    as->mapped_pages++;
+  }
+
+  vmm_switch(saved);
+  irq_restore(flags);
+  return (int)result;
+}
+
+void vmm_copy_to_user(address_space_t *as, uint32_t dst, const void *src, uint32_t len) {
+  uint32_t flags = irq_save();
+  uint32_t saved;
+  __asm__ volatile("mov %%cr3, %0" : "=r"(saved));
+  vmm_switch(as->pd_phys);
+  /* 유저 페이지가 읽기 전용이어도 CR0.WP=0 이라 커널(ring0)은 쓸 수 있다 */
+  memcpy((void *)dst, src, len);
+  vmm_switch(saved);
+  irq_restore(flags);
+}
+
+int vmm_user_range_ok(address_space_t *as, uint32_t addr, uint32_t len, int writable) {
+  if (!as) return 0;
+  uint32_t end = addr + len;
+  if (addr < USER_SPACE_BASE || end > USER_SPACE_TOP || end < addr) return 0;
+  for (uint32_t page = addr & PAGE_FRAME_MASK; page < end; page += PAGE_SIZE) {
+    page_t *pte = user_pte(as, page, 0);
+    if (!pte) return 0;
+    uint32_t value = entry_value(pte);
+    if (!(value & PAGE_PRESENT) || !(value & PAGE_US)) return 0;
+    if (writable && !(value & PAGE_RW)) return 0;
+  }
+  return 1;
+}
+
 static void set_pdt_entry(page_directory_t* pdt, uint32_t address, uint32_t attribute){
     uint32_t value = (address & PAGE_FRAME_MASK) | (attribute & 0x0FFF);
     pdt->attribute = value & 0xFF;
@@ -192,6 +351,12 @@ extern const char* process_guard_owner(uint32_t addr);
 void isr_page_fault(pt_regs* pt){
   uint32_t fault_addr;
   __asm__ volatile("mov %%cr2, %0" : "=r"(fault_addr));
+  if (pt->cs & 0x3) {
+    kprintf("[pid %u] Page Fault at 0x%x (%s, %s) eip=0x%x - killed\n", process_getpid(), fault_addr,
+            (pt->err_code & 0x1) ? "protection" : "not-present",
+            (pt->err_code & 0x2) ? "write" : "read", pt->eip);
+    process_exit(PROCESS_EXIT_FAULT);
+  }
   const char* owner = process_guard_owner(fault_addr);
   if (owner) {
     kpanic_regs(pt, "kernel stack overflow in %s (guard page 0x%x touched)", owner, fault_addr);

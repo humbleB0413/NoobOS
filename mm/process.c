@@ -4,9 +4,13 @@
 #include "linux/panic.h"
 #include "../driver/timer.h"
 #include "vmm.h"
+#include "linux/gdt.h"
 
 #define KERNEL_CODE_SELECTOR 0x08
+#define USER_CODE_SELECTOR   (0x18 | 3)
+#define USER_DATA_SELECTOR   (0x20 | 3)
 #define EFLAGS_RESERVED      0x002
+#define EXIT_RECORDS         16
 
 static process_t processes[PROCESS_MAX];
 static uint32_t current = 0;
@@ -16,8 +20,12 @@ static uint32_t slice_ticks = 0;
 static volatile uint32_t scheduler_ready = 0;
 /* 잠든 프로세스들 — wake_tick 오름차순이라 앞에서부터 깨우다 아직 이른 것을 만나면 멈추면 된다 */
 static list_node_t sleep_queue = LIST_HEAD_INIT(sleep_queue);
+/* 슬롯은 종료 즉시 재사용되므로 종료 코드는 따로 최근 몇 개만 기억해 둔다 */
+static struct { uint32_t pid; int code; } exit_records[EXIT_RECORDS];
+static uint32_t exit_record_next = 0;
 
 static void process_trap_return(void);
+static void user_trap_return(void);
 static void process_return_trampoline(void);
 
 static void idle_task(void){
@@ -56,6 +64,7 @@ void init_scheduling(void){
     processes[0].pid = next_pid++;
     processes[0].state = PROCESS_RUN;
     set_name(&processes[0], "kernel_main");
+    processes[0].cr3 = vmm_kernel_cr3();
     current = 0;
 
     process_t* idle = create_process((uint32_t)idle_task, "idle");
@@ -80,24 +89,28 @@ int scheduler_running(void){
  *
  * 첫 switch_context 의 ret -> process_trap_return -> popal; add $8; iret -> IF=1 로 pc 에서 시작.
  */
-process_t* create_process(uint32_t pc, const char* name){
-    process_t* proc = 0;
-    uint32_t flags = irq_save();
-
+static process_t* alloc_slot(const char* name){
     for(int i = 0; i < PROCESS_MAX; i++){
-        if(processes[i].state == PROCESS_UNUSED){
-            proc = &processes[i];
-            break;
+        process_t* proc = &processes[i];
+        if(proc->state == PROCESS_UNUSED){
+            memset(&proc->pid, 0, sizeof(*proc) - offsetof(process_t, pid));
+            list_init(&proc->sleep_node);
+            proc->pid = next_pid++;
+            proc->cr3 = vmm_kernel_cr3();
+            set_name(proc, name);
+            return proc;
         }
     }
+    return 0;
+}
 
+process_t* create_process(uint32_t pc, const char* name){
+    uint32_t flags = irq_save();
+    process_t* proc = alloc_slot(name);
     if(!proc){
         irq_restore(flags);
         return 0;
     }
-
-    memset(&proc->pid, 0, sizeof(*proc) - offsetof(process_t, pid));
-    list_init(&proc->sleep_node);
 
     uint32_t* top = (uint32_t*)(proc->stack + PROCESS_STACK_SIZE);
     *--top = (uint32_t)process_return_trampoline;
@@ -114,12 +127,53 @@ process_t* create_process(uint32_t pc, const char* name){
     sf->eip = (uint32_t)process_trap_return;
 
     proc->sp = (uint32_t)sf;
-    proc->pid = next_pid++;
-    set_name(proc, name);
     proc->state = PROCESS_RUN;
 
     irq_restore(flags);
     return proc;
+}
+
+/*
+ * 유저 프로세스도 커널 프로세스와 같은 "인터럽트로 멈춘 척" 프레임을 쓰되, CPL 이 바뀌는 iret 이라
+ * useresp/ss 까지 포함한 전체 trap frame 을 쌓는다. 커널 스택(stack[])은 이 프로세스가 유저 모드에서
+ * 인터럽트/시스템 콜을 받을 때 TSS.esp0 으로 쓰인다.
+ *
+ *   stack + SIZE -> | ss, useresp       |
+ *                   | eflags/cs/eip ... |  trap frame (전체)
+ *                   | switch frame      |  eip = user_trap_return
+ *   proc->sp     -> +-------------------+
+ */
+process_t* create_user_process(const char* name, address_space_t* as, uint32_t entry, uint32_t user_esp){
+    uint32_t flags = irq_save();
+    process_t* proc = alloc_slot(name);
+    if(!proc){
+        irq_restore(flags);
+        return 0;
+    }
+
+    context_t* tf = (context_t*)(proc->stack + PROCESS_STACK_SIZE) - 1;
+    memset(tf, 0, sizeof(*tf));
+    tf->eip = entry;
+    tf->cs = USER_CODE_SELECTOR;
+    tf->eflags = EFLAGS_IF | EFLAGS_RESERVED;
+    tf->useresp = user_esp;
+    tf->ss = USER_DATA_SELECTOR;
+
+    switch_frame_t* sf = (switch_frame_t*)tf - 1;
+    memset(sf, 0, sizeof(*sf));
+    sf->eip = (uint32_t)user_trap_return;
+
+    proc->sp = (uint32_t)sf;
+    proc->as = as;
+    proc->cr3 = as->pd_phys;
+    proc->state = PROCESS_RUN;
+
+    irq_restore(flags);
+    return proc;
+}
+
+address_space_t* process_current_as(void){
+    return processes[current].as;
 }
 
 static void wake_sleepers(void){
@@ -170,6 +224,9 @@ void yield(void){
     slice_ticks = 0;
     if(next != prev){
         current = next;
+        /* 다음 프로세스가 유저 모드에서 인터럽트를 받으면 자기 커널 스택으로 들어오도록 */
+        tss_set_kernel_stack((uint32_t)(processes[next].stack + PROCESS_STACK_SIZE));
+        vmm_switch(processes[next].cr3);
         switch_context(&processes[prev].sp, &processes[next].sp);
     }
 
@@ -213,18 +270,34 @@ void process_sleep(uint32_t ms){
     irq_restore(flags);
 }
 
-static void release_slot(process_t* proc){
+static void record_exit(uint32_t pid, int code){
+    exit_records[exit_record_next].pid = pid;
+    exit_records[exit_record_next].code = code;
+    exit_record_next = (exit_record_next + 1) % EXIT_RECORDS;
+}
+
+static void release_slot(process_t* proc, int code){
     if(proc->state == PROCESS_SLEEP){
         list_remove(&proc->sleep_node);
     }
+    if(proc->as){
+        /* 지금 이 주소 공간 위에서 실행 중일 수 있으니 먼저 커널 페이지 디렉터리로 옮긴 뒤 해제 */
+        if(proc == &processes[current]){
+            vmm_switch(vmm_kernel_cr3());
+            proc->cr3 = vmm_kernel_cr3();
+        }
+        vmm_destroy_address_space(proc->as);
+        proc->as = 0;
+    }
+    record_exit(proc->pid, code);
     proc->state = PROCESS_UNUSED;
 }
 
 /* 슬롯을 비우고 다른 프로세스로 넘어간다. 다시는 돌아오지 않는다 */
-void process_exit(void){
+void process_exit(int code){
     irq_save();
     KASSERT(current != 0 && current != idle_index);
-    release_slot(&processes[current]);
+    release_slot(&processes[current], code);
     yield();
     kpanic("exited process resumed");
 }
@@ -237,10 +310,10 @@ int process_kill(uint32_t pid){
         return -1;
     }
     if(proc == &processes[current]){
-        process_exit();
+        process_exit(PROCESS_EXIT_KILLED);
     }
     /* 다른 프로세스는 지금 switch_context 안에 멈춰 있으므로 슬롯만 비우면 다시 선택되지 않는다 */
-    release_slot(proc);
+    release_slot(proc, PROCESS_EXIT_KILLED);
     irq_restore(flags);
     return 0;
 }
@@ -249,10 +322,18 @@ int process_alive(uint32_t pid){
     return find_by_pid(pid) != 0;
 }
 
-void process_wait(uint32_t pid){
+int process_wait(uint32_t pid){
     while(process_alive(pid)){
         process_sleep(10);
     }
+    /* 가장 최근 기록부터 찾는다 */
+    for(int i = 1; i <= EXIT_RECORDS; i++){
+        uint32_t idx = (exit_record_next + EXIT_RECORDS - i) % EXIT_RECORDS;
+        if(exit_records[idx].pid == pid){
+            return exit_records[idx].code;
+        }
+    }
+    return PROCESS_EXIT_UNKNOWN;
 }
 
 int process_snapshot(process_info_t* out, int max){
@@ -324,7 +405,25 @@ __attribute__((naked)) static void process_trap_return(void){
     );
 }
 
+/*
+ * 유저 프로세스의 첫 진입점. iret 으로 ring3 에 갈 때 DPL 0 인 커널 데이터 셀렉터(0x10)가 ds/es 에 남아 있으면
+ * CPU 가 그 레지스터를 0 으로 만들어 버리므로, 유저 데이터 셀렉터(0x23)를 미리 넣는다.
+ * 세그먼트가 모두 flat(base 0, 4GB)이라 이후 커널 코드가 0x23 으로 데이터에 접근해도 동작은 같다.
+ */
+__attribute__((naked)) static void user_trap_return(void){
+    __asm__ volatile(
+        "mov $0x23, %ax\n"
+        "mov %ax, %ds\n"
+        "mov %ax, %es\n"
+        "mov %ax, %fs\n"
+        "mov %ax, %gs\n"
+        "popal\n"
+        "add $8, %esp\n"
+        "iret\n"
+    );
+}
+
 /* 프로세스 함수가 return 하면 도착 */
 static void process_return_trampoline(void){
-    process_exit();
+    process_exit(0);
 }

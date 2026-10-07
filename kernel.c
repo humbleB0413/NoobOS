@@ -16,6 +16,7 @@ int kernel_main(unsigned long magic, unsigned long addr){
     init_pmm(addr);
     init_vmm();
     init_double_fault_task();
+    init_syscall();
     init_scheduling();
     kprintf("NoobOS: boot complete\n");
 
