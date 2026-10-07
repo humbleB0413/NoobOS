@@ -43,6 +43,8 @@ typedef struct {
 } pmm_t;
 
 void init_vmm();
+/* 첫 4MB identity 매핑 안의 페이지 하나를 비활성화한다 — 커널 스택 가드 페이지용 */
+void vmm_unmap_identity_page(uint32_t addr);
 void *kmalloc(uint32_t size);
 void kfree(void *address);
 

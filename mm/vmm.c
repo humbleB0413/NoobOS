@@ -150,6 +150,12 @@ static void kfree_unlocked(void *address) {
   }
 }
 
+void vmm_unmap_identity_page(uint32_t addr) {
+  KASSERT(addr < 1024 * PAGE_SIZE && (addr & (PAGE_SIZE - 1)) == 0);
+  set_pt_entry(&pmm.non_touchable_pt[addr / PAGE_SIZE], 0, 0);
+  invlpg(addr);
+}
+
 void *kmalloc(uint32_t size) {
   if (size == 0) return 0;
   spin_lock(&heap_lock);
@@ -181,9 +187,15 @@ static void set_pt_entry(page_t* pt, uint32_t address, uint32_t attribute){
     return;
 }
 
+extern const char* process_guard_owner(uint32_t addr);
+
 void isr_page_fault(pt_regs* pt){
   uint32_t fault_addr;
   __asm__ volatile("mov %%cr2, %0" : "=r"(fault_addr));
+  const char* owner = process_guard_owner(fault_addr);
+  if (owner) {
+    kpanic_regs(pt, "kernel stack overflow in %s (guard page 0x%x touched)", owner, fault_addr);
+  }
   kpanic_regs(pt, "Page Fault at 0x%x (%s, %s, %s)",
         fault_addr,
         (pt->err_code & 0x1) ? "protection" : "not-present",

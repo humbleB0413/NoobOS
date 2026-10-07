@@ -3,6 +3,7 @@
 #include "linux/spinlock.h"
 #include "linux/panic.h"
 #include "../driver/timer.h"
+#include "vmm.h"
 
 #define KERNEL_CODE_SELECTOR 0x08
 #define EFLAGS_RESERVED      0x002
@@ -49,6 +50,9 @@ void init_scheduling(void){
 
     memset(processes, 0, sizeof(processes));
     list_init(&sleep_queue);
+    for(int i = 0; i < PROCESS_MAX; i++){
+        vmm_unmap_identity_page((uint32_t)processes[i].guard);
+    }
     processes[0].pid = next_pid++;
     processes[0].state = PROCESS_RUN;
     set_name(&processes[0], "kernel_main");
@@ -92,7 +96,7 @@ process_t* create_process(uint32_t pc, const char* name){
         return 0;
     }
 
-    memset(proc, 0, sizeof(*proc) - PROCESS_STACK_SIZE);
+    memset(&proc->pid, 0, sizeof(*proc) - offsetof(process_t, pid));
     list_init(&proc->sleep_node);
 
     uint32_t* top = (uint32_t*)(proc->stack + PROCESS_STACK_SIZE);
@@ -266,6 +270,30 @@ int process_snapshot(process_info_t* out, int max){
     }
     irq_restore(flags);
     return n;
+}
+
+const char* process_guard_owner(uint32_t addr){
+    static char desc[48];
+    for(int i = 0; i < PROCESS_MAX; i++){
+        uint32_t guard = (uint32_t)processes[i].guard;
+        if(addr >= guard && addr < guard + sizeof(processes[i].guard)){
+            /* kprintf 계열이 없어 직접 조립: "pid N (name)" */
+            char num[12];
+            int len = 0;
+            uint32_t pid = processes[i].pid;
+            do { num[len++] = '0' + pid % 10; pid /= 10; } while(pid);
+            int o = 0;
+            for(const char* p = "pid "; *p; p++) desc[o++] = *p;
+            while(len) desc[o++] = num[--len];
+            desc[o++] = ' ';
+            desc[o++] = '(';
+            for(int k = 0; k < PROCESS_NAME_LEN && processes[i].name[k]; k++) desc[o++] = processes[i].name[k];
+            desc[o++] = ')';
+            desc[o] = '\0';
+            return desc;
+        }
+    }
+    return 0;
 }
 
 /* cdecl: 4(%esp) = prev_sp, 8(%esp) = next_sp */

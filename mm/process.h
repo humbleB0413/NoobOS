@@ -15,8 +15,14 @@
 #include <stdint.h>
 #include "list.h"
 
-typedef struct
+/*
+ * 페이지 정렬된 구조체 맨 앞에 가드 페이지(매핑 해제)와 커널 스택을 둔다. 스택은 아래로 자라므로
+ * 넘치면 곧바로 가드 페이지를 건드려 fault 가 나고, 옆 슬롯의 메타데이터를 조용히 덮어쓰지 않는다.
+ */
+typedef struct __attribute__((aligned(4096)))
 {
+    uint8_t guard[4096];
+    uint8_t stack[PROCESS_STACK_SIZE];
     uint32_t pid;
     uint32_t state;
     uint32_t sp;                        /* 전환 시점의 esp — 레지스터는 전부 이 스택 위에 있음 */
@@ -24,7 +30,6 @@ typedef struct
     uint64_t cpu_ticks;                 /* 이 프로세스가 실행 중일 때 지나간 타이머 tick 수 */
     list_node_t sleep_node;             /* wake_tick 오름차순 sleep_queue 연결 */
     char name[PROCESS_NAME_LEN];
-    uint8_t stack[PROCESS_STACK_SIZE];
 } process_t;
 
 /* 인터럽트 진입 시 스택에 쌓이는 trap frame (linux/idt.h 의 pt_regs 와 동일한 배치) */
@@ -71,6 +76,8 @@ int process_alive(uint32_t pid);
 /* pid 가 끝날 때까지 잠들며 기다린다 */
 void process_wait(uint32_t pid);
 int process_snapshot(process_info_t* out, int max);
+/* addr 가 어떤 프로세스의 스택 가드 페이지면 "pid N (name)" 문자열, 아니면 NULL */
+const char* process_guard_owner(uint32_t addr);
 
 __attribute__((naked)) void switch_context(uint32_t* prev_sp, uint32_t* next_sp);
 

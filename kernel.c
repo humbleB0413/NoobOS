@@ -15,6 +15,7 @@ int kernel_main(unsigned long magic, unsigned long addr){
     KASSERT(magic == MULTIBOOT_BOOTLOADER_MAGIC);
     init_pmm(addr);
     init_vmm();
+    init_double_fault_task();
     init_scheduling();
     kprintf("NoobOS: boot complete\n");
 
