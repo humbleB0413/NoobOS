@@ -3,6 +3,7 @@
 int kernel_main(unsigned long magic, unsigned long addr){
 
     terminal_initialize();
+    init_serial();
     init_gdt();
     init_idt();
     init_trap();
@@ -14,6 +15,7 @@ int kernel_main(unsigned long magic, unsigned long addr){
     init_pmm(addr);
     init_vmm();
     init_scheduling();
+    kprintf("NoobOS: boot complete\n");
 
     char keyboard_input = '\0';
     allocated_frame_info_t alloc_info = {0};

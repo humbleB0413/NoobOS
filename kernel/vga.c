@@ -7,6 +7,7 @@ static size_t terminal_row;
 static size_t terminal_column;
 static uint8_t terminal_color;
 static uint16_t* terminal_buffer = (uint16_t*)VGA_MEMORY;
+static void (*terminal_mirror)(char) = 0;
 
 /* CRTC 커서 위치 레지스터(0x0E/0x0F)를 갱신해 깜빡이는 하드웨어 커서를 출력 위치에 맞춘다 */
 static void terminal_update_cursor(void) {
@@ -41,6 +42,9 @@ void terminal_initialize(void) {
 
 void terminal_setcolor(uint8_t color) { terminal_color = color; }
 
+/* VGA 로 나가는 모든 문자를 다른 출력 장치(시리얼 등)에도 복제한다 */
+void terminal_set_mirror(void (*mirror)(char)) { terminal_mirror = mirror; }
+
 void terminal_putentryat(char c, uint8_t color, size_t x, size_t y) {
   const size_t index = y * VGA_WIDTH + x;
   terminal_buffer[index] = vga_entry(c, color);
@@ -62,6 +66,7 @@ static void terminal_newline(void) {
 }
 
 void terminal_putchar(char c) {
+  if (terminal_mirror) terminal_mirror(c);
   switch (c) {
     case '\n':
       terminal_newline();
