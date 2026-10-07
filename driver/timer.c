@@ -28,7 +28,7 @@ void irq_pic_timer(pt_regs* regs){
     uint8_t irq = (uint8_t)(regs->int_no - IRQ_BASE);
     SYSTEM_TIMER += 1;
     pic_send_eoi(irq);
-    yield();
+    schedule_tick();
 }
 
 static inline uint64_t ms_to_ticks(uint64_t ms){
@@ -43,7 +43,12 @@ void sleep(uint64_t s){
     msleep(1000 * s);
 }
 
+/* 스케줄러가 돌고 있으면 잠들어서 CPU 를 양보하고, 그 전(부팅 초기)에는 tick 을 바쁘게 기다린다 */
 void msleep(uint64_t ms){
+    if(scheduler_running()){
+        process_sleep((uint32_t)ms_to_ticks(ms));
+        return;
+    }
     uint64_t wait = ms_to_ticks(ms);
     uint64_t prev_sys_timer = SYSTEM_TIMER;
 
