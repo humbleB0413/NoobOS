@@ -11,8 +11,7 @@ init_paging_asm:
 
 .global asm_isr_page_fault
 asm_isr_page_fault:
-    push $0
-    push $32
+    push $14
     push_regs
     mov %esp, %eax
     push %eax
