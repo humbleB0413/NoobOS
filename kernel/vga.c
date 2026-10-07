@@ -2,6 +2,7 @@
 
 #include "string.h"
 #include "port_io.h"
+#include "linux/spinlock.h"
 
 static size_t terminal_row;
 static size_t terminal_column;
@@ -230,7 +231,11 @@ void kvprintf(const char *fmt, va_list ap)
 void kprintf(const char *fmt, ...)
 {
     va_list ap;
+    /* 한 번의 kprintf 출력이 다른 프로세스 출력과 섞이지 않게 한다.
+     * 패닉 경로에서도 불리므로 재귀 검사가 있는 spinlock 대신 인터럽트 차단만 쓴다 */
+    uint32_t flags = irq_save();
     va_start(ap, fmt);
     kvprintf(fmt, ap);
     va_end(ap);
+    irq_restore(flags);
 }

@@ -1,6 +1,7 @@
 #include "pmm.h"
 
 #include "string.h"
+#include "linux/spinlock.h"
 #define ERROR_CODE 0xFFFFFFFF
 
 static uint32_t pmm_bitmap[PMM_MAX_FRAME_SIZE / 32];
@@ -44,7 +45,9 @@ void init_pmm(unsigned long mbi_address) {
   return;
 }
 
-uint32_t alloc_frame(uint32_t count, allocated_frame_info_t *info) {
+static spinlock_t pmm_lock = SPINLOCK_INIT("pmm_bitmap");
+
+static uint32_t alloc_frame_unlocked(uint32_t count, allocated_frame_info_t *info) {
   if (count > PMM_MAX_FRAMES_COUNT || count <= 0) return ERROR_CODE;
 
   memset(info, 0, sizeof(*info));
@@ -72,7 +75,14 @@ uint32_t alloc_frame(uint32_t count, allocated_frame_info_t *info) {
   }
 }
 
-uint32_t alloc_frame_contiguous(uint32_t count, allocated_frame_info_t *info) {
+uint32_t alloc_frame(uint32_t count, allocated_frame_info_t *info) {
+  spin_lock(&pmm_lock);
+  uint32_t result = alloc_frame_unlocked(count, info);
+  spin_unlock(&pmm_lock);
+  return result;
+}
+
+static uint32_t alloc_frame_contiguous_unlocked(uint32_t count, allocated_frame_info_t *info) {
   if (count > PMM_MAX_FRAMES_COUNT || count == 0) return ERROR_CODE;
 
   memset(info, 0, sizeof(*info));
@@ -107,13 +117,22 @@ uint32_t alloc_frame_contiguous(uint32_t count, allocated_frame_info_t *info) {
   return ERROR_CODE;
 }
 
+uint32_t alloc_frame_contiguous(uint32_t count, allocated_frame_info_t *info) {
+  spin_lock(&pmm_lock);
+  uint32_t result = alloc_frame_contiguous_unlocked(count, info);
+  spin_unlock(&pmm_lock);
+  return result;
+}
+
 void free_frame(allocated_frame_info_t *info) {
+  spin_lock(&pmm_lock);
   for (uint32_t i = 0; i < info->count; i++) {
     uint32_t frame = info->frames[i];
     if (pmm_bitmap[frame / 32] & (1u << (frame % 32))) {
       pmm_bitmap[frame / 32] &= ~(1u << (frame % 32));
     }
   }
+  spin_unlock(&pmm_lock);
 }
 
 #if 1

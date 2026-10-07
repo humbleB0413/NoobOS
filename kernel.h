@@ -6,6 +6,7 @@
 #include "linux/idt.h"
 #include "linux/trap.h"
 #include "linux/panic.h"
+#include "linux/spinlock.h"
 #include "linux/irq.h"
 #include "driver/pic.h"
 #include "driver/timer.h"

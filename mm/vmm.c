@@ -4,10 +4,12 @@
 #include "linux/irq.h"
 #include "linux/trap.h"
 #include "linux/panic.h"
+#include "linux/spinlock.h"
 
 #define PMM_ERROR_CODE 0xFFFFFFFF
 
 pmm_t pmm;
+static spinlock_t heap_lock = SPINLOCK_INIT("kernel_heap");
 
 extern void init_paging_asm(uint32_t address);
 extern void asm_isr_page_fault(void);
@@ -97,8 +99,7 @@ static void heap_release_page(uint32_t index) {
   invlpg(KERNEL_HEAP_VIRT_BASE + index * PAGE_SIZE);
 }
 
-void *kmalloc(uint32_t size) {
-  if (size == 0) return 0;
+static void *kmalloc_unlocked(uint32_t size) {
 
   /* 헤더 크기(4 + page_count*4)가 page_count에 의존하므로, 안정될 때까지
    * 반복 계산한다. 반복마다 4바이트/페이지씩만 자라서 몇 번 안에 수렴함. */
@@ -137,8 +138,7 @@ void *kmalloc(uint32_t size) {
   return (void *)(page_count_slot + 1);
 }
 
-void kfree(void *address) {
-  if (!address) return;
+static void kfree_unlocked(void *address) {
 
   uint32_t page_count = *((uint32_t *)address - 1);
   uint32_t vaddr_base =
@@ -148,6 +148,21 @@ void kfree(void *address) {
   for (uint32_t i = 0; i < page_count; i++) {
     heap_release_page(heap_start + i);
   }
+}
+
+void *kmalloc(uint32_t size) {
+  if (size == 0) return 0;
+  spin_lock(&heap_lock);
+  void *ptr = kmalloc_unlocked(size);
+  spin_unlock(&heap_lock);
+  return ptr;
+}
+
+void kfree(void *address) {
+  if (!address) return;
+  spin_lock(&heap_lock);
+  kfree_unlocked(address);
+  spin_unlock(&heap_lock);
 }
 
 static void set_pdt_entry(page_directory_t* pdt, uint32_t address, uint32_t attribute){

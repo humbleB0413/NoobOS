@@ -1,8 +1,8 @@
 #include "process.h"
 #include "string.h"
+#include "linux/spinlock.h"
 
 #define KERNEL_CODE_SELECTOR 0x08
-#define EFLAGS_IF            0x200
 #define EFLAGS_RESERVED      0x002
 
 static process_t processes[PROCESS_MAX];
@@ -12,18 +12,6 @@ static volatile uint32_t scheduler_ready = 0;
 
 static void process_trap_return(void);
 static void process_exit(void);
-
-static inline uint32_t irq_save(void){
-    uint32_t flags;
-    __asm__ volatile("pushf; pop %0; cli" : "=r"(flags) :: "memory");
-    return flags;
-}
-
-static inline void irq_restore(uint32_t flags){
-    if(flags & EFLAGS_IF){
-        __asm__ volatile("sti" ::: "memory");
-    }
-}
 
 /*
  * 현재 실행 흐름(kernel_main, 부팅 스택)을 processes[0] 으로 등록한다.
