@@ -1,11 +1,21 @@
 #include "linux/vga.h"
 
 #include "string.h"
+#include "port_io.h"
 
 static size_t terminal_row;
 static size_t terminal_column;
 static uint8_t terminal_color;
 static uint16_t* terminal_buffer = (uint16_t*)VGA_MEMORY;
+
+/* CRTC 커서 위치 레지스터(0x0E/0x0F)를 갱신해 깜빡이는 하드웨어 커서를 출력 위치에 맞춘다 */
+static void terminal_update_cursor(void) {
+  uint16_t pos = (uint16_t)(terminal_row * VGA_WIDTH + terminal_column);
+  outb(0x3D4, 0x0F);
+  outb(0x3D5, (uint8_t)(pos & 0xFF));
+  outb(0x3D4, 0x0E);
+  outb(0x3D5, (uint8_t)(pos >> 8));
+}
 
 static inline uint8_t vga_entry_color(enum vga_color fg, enum vga_color bg) {
   return fg | bg << 4;
@@ -26,6 +36,7 @@ void terminal_initialize(void) {
       terminal_buffer[index] = vga_entry(' ', terminal_color);
     }
   }
+  terminal_update_cursor();
 }
 
 void terminal_setcolor(uint8_t color) { terminal_color = color; }
@@ -35,22 +46,44 @@ void terminal_putentryat(char c, uint8_t color, size_t x, size_t y) {
   terminal_buffer[index] = vga_entry(c, color);
 }
 
+/* 한 줄 위로 밀어 올리고 마지막 줄을 비운다 — 25줄을 넘는 출력이 화면 밖(0xB8000+4000 이후)에 써지던 문제 수정 */
+static void terminal_scroll(void) {
+  memcpy(terminal_buffer, terminal_buffer + VGA_WIDTH,
+         (VGA_HEIGHT - 1) * VGA_WIDTH * sizeof(uint16_t));
+  for (size_t x = 0; x < VGA_WIDTH; x++) {
+    terminal_buffer[(VGA_HEIGHT - 1) * VGA_WIDTH + x] = vga_entry(' ', terminal_color);
+  }
+  terminal_row = VGA_HEIGHT - 1;
+}
+
+static void terminal_newline(void) {
+  terminal_column = 0;
+  if (++terminal_row == VGA_HEIGHT) terminal_scroll();
+}
+
 void terminal_putchar(char c) {
   switch (c) {
     case '\n':
-      terminal_column = 0;
-      terminal_row += 1;
+      terminal_newline();
       break;
     case '\t':
-      terminal_column += 4;
+      terminal_column = (terminal_column + 4) & ~3u;
+      if (terminal_column >= VGA_WIDTH) terminal_newline();
+      break;
+    case '\b':
+      if (terminal_column > 0) {
+        terminal_column--;
+      } else if (terminal_row > 0) {
+        terminal_row--;
+        terminal_column = VGA_WIDTH - 1;
+      }
+      terminal_putentryat(' ', terminal_color, terminal_column, terminal_row);
       break;
     default:
       terminal_putentryat(c, terminal_color, terminal_column, terminal_row);
-      if (++terminal_column == VGA_WIDTH) {
-        terminal_column = 0;
-        if (++terminal_row == VGA_HEIGHT) terminal_row = 0;
-      }
+      if (++terminal_column == VGA_WIDTH) terminal_newline();
   }
+  terminal_update_cursor();
 }
 
 void terminal_write(const char* data, size_t size) {
