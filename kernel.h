@@ -16,5 +16,7 @@
 #include "mm/vmm.h"
 #include "mm/process.h"
 #include "multiboot.h"
+#include "kstd.h"
+#include "list.h"
 
 #endif
