@@ -12,6 +12,7 @@
 #include "driver/timer.h"
 #include "driver/keyboard.h"
 #include "driver/serial.h"
+#include "driver/rtc.h"
 #include "mm/pmm.h"
 #include "mm/vmm.h"
 #include "mm/process.h"
