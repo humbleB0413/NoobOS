@@ -34,7 +34,9 @@
 #else
 # define AOUT_KLUDGE MULTIBOOT_AOUT_KLUDGE
 #endif
-#define MULTIBOOT_HEADER_FLAGS                  MULTIBOOT_PAGE_ALIGN | MULTIBOOT_MEMORY_INFO | MULTIBOOT_VIDEO_MODE | AOUT_KLUDGE
+/* VIDEO_MODE 플래그는 넣지 않는다: 커널은 VGA 텍스트 모드(0xB8000)만 쓰는데, 1024x768x32 그래픽 모드를
+ * 요청하면 GRUB 같은 로더가 실제로 모드를 바꿔 텍스트 출력이 보이지 않게 된다(QEMU -kernel 은 경고 후 무시). */
+#define MULTIBOOT_HEADER_FLAGS                  MULTIBOOT_PAGE_ALIGN | MULTIBOOT_MEMORY_INFO | AOUT_KLUDGE
         
         .text
 
