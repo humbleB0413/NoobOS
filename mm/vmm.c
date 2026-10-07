@@ -28,6 +28,9 @@ void init_vmm(){
         set_pt_entry(&(pmm.non_touchable_pt[i]), (uint32_t)phys_address, PAGE_PRESENT | PAGE_RW);
     }
 
+    // 0번 페이지는 매핑하지 않는다: 커널의 NULL 포인터 역참조가 조용히 물리 주소 0 을 읽는 대신 #PF 로 드러나게
+    set_pt_entry(&(pmm.non_touchable_pt[0]), 0, 0);
+
     set_pdt_entry(&(pmm.kernel_pdt[0]), (uint32_t)pmm.non_touchable_pt, PAGE_PRESENT | PAGE_RW);
     // 첫 4MB에 대해서만 identity paging
 
