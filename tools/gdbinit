@@ -1,0 +1,51 @@
+# NoobOS GDB 도우미 — `make gdb` 가 자동으로 불러온다 (make debug-qemu 와 함께 사용)
+
+set disassembly-flavor att
+set pagination off
+
+# 커널이 멈추는 지점에 미리 걸어 둔다: 패닉 직전 백트레이스를 볼 수 있다
+break kpanic
+break kpanic_regs
+
+# ps — 프로세스 테이블 출력
+define ps
+  set $i = 0
+  while $i < 8
+    if processes[$i].state != 0
+      printf "slot %d pid %u state %u sp 0x%08x cr3 0x%08x %s\n", $i, processes[$i].pid, processes[$i].state, processes[$i].sp, processes[$i].cr3, processes[$i].name
+    end
+    set $i = $i + 1
+  end
+  printf "current slot = %u\n", current
+end
+document ps
+Print the scheduler's process table (slot, pid, state, saved esp, cr3, name).
+end
+
+# regs <pt_regs*> — 인터럽트 프레임을 보기 좋게
+define regs
+  set $r = (pt_regs*)$arg0
+  printf "int %u err 0x%x  eip 0x%08x cs 0x%x eflags 0x%x\n", $r->int_no, $r->err_code, $r->eip, $r->cs, $r->eflags
+  printf "eax 0x%08x ebx 0x%08x ecx 0x%08x edx 0x%08x\n", $r->eax, $r->ebx, $r->ecx, $r->edx
+  printf "esi 0x%08x edi 0x%08x ebp 0x%08x esp 0x%08x\n", $r->esi, $r->edi, $r->ebp, $r->esp
+end
+document regs
+Pretty-print a pt_regs frame, e.g. `regs pt` inside isr_page_fault.
+end
+
+# pte <vaddr> — 현재 CR3 기준으로 가상 주소의 PDE/PTE 를 따라가 본다 (첫 4MB 는 identity 라 물리=가상)
+define pte
+  set $va = (unsigned)$arg0
+  set $pd = (unsigned*)($cr3 & 0xfffff000)
+  set $pde = $pd[$va >> 22]
+  printf "PDE[%u] = 0x%08x\n", $va >> 22, $pde
+  if ($pde & 1) && (($pde & 0xfffff000) < 0x400000)
+    set $pt = (unsigned*)($pde & 0xfffff000)
+    printf "PTE[%u] = 0x%08x\n", ($va >> 12) & 0x3ff, $pt[($va >> 12) & 0x3ff]
+  else
+    printf "(page table not identity-mapped or not present; inspect with `monitor info tlb`)\n"
+  end
+end
+document pte
+Walk the page tables of the current CR3 for a virtual address.
+end

@@ -80,7 +80,7 @@ QEMUFLAGS += -drive file=$(DISK),format=raw,if=ide,index=0
 endif
 
 # ── Targets ────────────────────────────────────────────────────────────────────
-.PHONY: all run debug-qemu gdb clean info
+.PHONY: all run debug-qemu gdb test clean info
 
 all: $(KERNEL) $(INITRD)
 	@echo "[$(MODE)] $(KERNEL) ready"
@@ -129,7 +129,13 @@ gdb: $(KERNEL)
 	gdb \
 	    -ex "set architecture i386" \
 	    -ex "symbol-file $(KERNEL)" \
-	    -ex "target remote :1234"
+	    -ex "target remote :1234" \
+	    -x tools/gdbinit
+
+# QEMU 를 화면 없이 띄워 시리얼로 셸을 조작하는 자동 스모크 테스트 (selftest 명령이 있는 debug 빌드 필요)
+test:
+	$(MAKE) MODE=debug all
+	python3 tools/smoke_test.py $(BUILD_DIR)/debug/kernel.elf $(BUILD_DIR)/debug/initrd.tar
 
 clean:
 	rm -rf $(BUILD_DIR)
