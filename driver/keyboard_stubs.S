@@ -3,7 +3,7 @@
 .global asm_irq_keyboard
 asm_irq_keyboard:
     push $0
-    push $32
+    push $33
     push_regs
     mov %esp, %eax
     push %eax

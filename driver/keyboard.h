@@ -34,7 +34,8 @@
 #define KEYBOARD_RESPONSE_RESEND 0xFE
 #define KEYBOARD_RESPONSE_BUFFER_OVERRUN 0xFF
 
-#define KEYBOARD_INPUT_BUFFER_SIZE 3000
+/* 원형 큐 크기. 2의 거듭제곱이어야 인덱스를 & (SIZE-1) 로 감쌀 수 있다 */
+#define KEYBOARD_INPUT_BUFFER_SIZE 256
 
 /* scancode_to_ascii()의 일반 반환값은 ASCII(0x00~0x7F) 범위이므로,
    ASCII로 표현할 수 없는 확장(0xE0 접두) 키들은 0x80 이상을 예약해 구분한다. */
@@ -49,15 +50,21 @@
 #define KEY_INSERT    0x88
 #define KEY_DELETE    0x89
 
+/*
+ * head = 다음에 읽을 위치, tail = 다음에 쓸 위치. 둘 다 감싸지 않고 계속 증가시키며
+ * (tail - head) 가 들어 있는 키 개수다 — unsigned 오버플로가 나도 차이는 그대로 맞는다.
+ * IRQ(생산자)는 tail 만, 읽는 쪽(소비자)은 head 만 바꾸므로 서로의 데이터를 덮어쓰지 않는다.
+ */
 typedef struct{
-    int head;
-    int tail;
+    volatile uint32_t head;
+    volatile uint32_t tail;
     uint8_t input[KEYBOARD_INPUT_BUFFER_SIZE];
 } keyboard_t;
 
 void init_keyboard();
 uint8_t keyboard_get_key();
 void keyboard_clear();
+int keyboard_has_key();
 
 
 #endif

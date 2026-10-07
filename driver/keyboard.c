@@ -11,7 +11,7 @@ uint8_t scancode_to_ascii(uint8_t code, int shift, int extended);
 
 void init_keyboard() {
   KEYBOARD_INPUT.head = 0;
-  KEYBOARD_INPUT.tail = -1;
+  KEYBOARD_INPUT.tail = 0;
   memset(KEYBOARD_INPUT.input, '\0', KEYBOARD_INPUT_BUFFER_SIZE);
 
   outb(KEYBOARD_DATA_PORT, KEYBOARD_CMD_RESET);
@@ -35,24 +35,33 @@ void init_keyboard() {
   return;
 }
 
+#define KEYBOARD_INDEX(i) ((i) & (KEYBOARD_INPUT_BUFFER_SIZE - 1))
+
+int keyboard_has_key(){
+  return KEYBOARD_INPUT.tail != KEYBOARD_INPUT.head;
+}
+
+/* 버퍼가 비어 있으면 '\0' */
 uint8_t keyboard_get_key(){
-  if(KEYBOARD_INPUT.tail >= KEYBOARD_INPUT.head){
-    __asm__ volatile("cli");
-    char current_key = KEYBOARD_INPUT.input[KEYBOARD_INPUT.head++];
-    __asm__ volatile("sti");
-    if(KEYBOARD_INPUT.head >= KEYBOARD_INPUT_BUFFER_SIZE){
-      KEYBOARD_INPUT.head = 0;
-    }
-    return current_key;
+  if(!keyboard_has_key()){
+    return '\0';
   }
-  return '\0';
+  uint8_t key = KEYBOARD_INPUT.input[KEYBOARD_INDEX(KEYBOARD_INPUT.head)];
+  KEYBOARD_INPUT.head++;
+  return key;
 }
 
 void keyboard_clear(){
-  __asm__ volatile("cli");
-  KEYBOARD_INPUT.head = 0;
-  KEYBOARD_INPUT.tail = -1;
-  __asm__ volatile("sti");
+  KEYBOARD_INPUT.head = KEYBOARD_INPUT.tail;
+}
+
+/* 가득 차면 새 키를 버린다 — 예전처럼 head 를 0 으로 되돌려 아직 안 읽은 키를 날리지 않는다 */
+static void keyboard_push(uint8_t key){
+  if(KEYBOARD_INPUT.tail - KEYBOARD_INPUT.head >= KEYBOARD_INPUT_BUFFER_SIZE){
+    return;
+  }
+  KEYBOARD_INPUT.input[KEYBOARD_INDEX(KEYBOARD_INPUT.tail)] = key;
+  KEYBOARD_INPUT.tail++;
 }
 
 void irq_keyboard(pt_regs* regs) {
@@ -73,11 +82,10 @@ void irq_keyboard(pt_regs* regs) {
       shift_pressed = !released;
     }
     if (!released) {
-      if (KEYBOARD_INPUT.tail >= KEYBOARD_INPUT_BUFFER_SIZE-1) {
-        KEYBOARD_INPUT.tail = -1; // 초기화: 비어 있는 상태를 제외하고 항상 tail이 head 앞에 오도록
-        KEYBOARD_INPUT.head = 0;
+      uint8_t key = scancode_to_ascii(code, shift_pressed, extended);
+      if (key != '\0') {
+        keyboard_push(key);
       }
-      KEYBOARD_INPUT.input[++KEYBOARD_INPUT.tail] = scancode_to_ascii(code, shift_pressed, extended);
     }
 
     extended = 0;
