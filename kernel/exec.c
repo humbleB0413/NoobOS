@@ -25,7 +25,7 @@ static int load_segments(address_space_t *as, const uint8_t *image, uint32_t siz
     if (ph[i].p_type != PT_LOAD || ph[i].p_memsz == 0) continue;
     uint32_t start = ph[i].p_vaddr, end = start + ph[i].p_memsz;
     /* 세그먼트가 유저 영역 밖(커널 주소)을 요구하거나 파일 범위를 벗어나면 거부 */
-    if (start < USER_SPACE_BASE || end > USER_SPACE_TOP - USER_STACK_PAGES * 4096 || end < start ||
+    if (start < USER_SPACE_BASE || end > USER_STACK_LIMIT || end < start ||
         ph[i].p_filesz > ph[i].p_memsz || ph[i].p_offset + ph[i].p_filesz > size) {
       return E_INVAL;
     }

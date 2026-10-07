@@ -77,6 +77,8 @@ CASES = [
     ("fault null", ["Page Fault at 0x0", "terminated by a fault"], [], 10),
     ("fault cli", ["General Protection Fault", "terminated by a fault"], [], 10),
     ("fault div", ["Divide by Zero", "terminated by a fault"], [], 10),
+    ("fault stack 600", ["survived"], ["terminated"], 15),
+    ("fault stack 2000", ["terminated by a fault"], ["survived"], 15),
     ("nosuchprogram", ["command not found"], [], 10),
     ("disk write 3 smoke-test-marker", ["wrote sector 3"], [], 10),
     ("disk read 3", ["smoke-test-marker"[:16]], ["failed"], 10),

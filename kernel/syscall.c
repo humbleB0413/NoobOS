@@ -4,6 +4,7 @@
 #include "../mm/process.h"
 #include "../driver/timer.h"
 #include "../fs/vfs.h"
+#include "../mm/pmm.h"
 #include "string.h"
 #include "linux/exec.h"
 
@@ -16,10 +17,21 @@ void init_syscall(void) {
                      IDT_P | IDT_DPL_USER | IDT_GATE_TYPE_32BIT_INTERRUPT);
 }
 
+/* 지금 처리 중인 시스템 콜을 부른 유저의 esp — 스택 위 버퍼가 아직 매핑 전일 때 확장 판단에 쓴다 */
+static uint32_t caller_esp;
+
 /* 유저가 넘긴 포인터는 반드시 현재 주소 공간에서 유저 접근 가능한지 확인한 뒤에만 만진다 —
  * 커널 주소를 넘겨 커널 메모리를 읽거나 쓰게 만드는 것을 막는다 */
 static int user_buffer_ok(uint32_t addr, uint32_t len, int writable) {
-  return len == 0 || vmm_user_range_ok(process_current_as(), addr, len, writable);
+  if (len == 0) return 1;
+  uint32_t end = addr + len;
+  if (end < addr) return 0;
+  address_space_t *as = process_current_as();
+  /* 지역 배열처럼 esp 아래로 잡았지만 아직 한 번도 건드리지 않은 스택 버퍼는 여기서 미리 붙여 준다 */
+  for (uint32_t page = addr & PAGE_FRAME_MASK; page < end; page += PAGE_SIZE) {
+    if (!vmm_user_range_ok(as, page, 1, 0)) vmm_grow_user_stack(as, page, caller_esp);
+  }
+  return vmm_user_range_ok(as, addr, len, writable);
 }
 
 /* NUL 로 끝나는 유저 문자열을 커널 버퍼로 복사. 너무 길거나 잘못된 포인터면 음수 */
@@ -118,6 +130,7 @@ static int sys_read(uint32_t fd, uint32_t buf, uint32_t len) {
 
 void syscall_dispatch(pt_regs *regs) {
   int ret;
+  caller_esp = regs->useresp;
   switch (regs->eax) {
     case SYS_EXIT:
       process_exit((int)regs->ebx);

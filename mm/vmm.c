@@ -327,6 +327,12 @@ int vmm_map_user_range(address_space_t *as, uint32_t vaddr, uint32_t size, int w
   return (int)result;
 }
 
+int vmm_grow_user_stack(address_space_t *as, uint32_t addr, uint32_t user_esp) {
+  if (!as || addr < USER_STACK_LIMIT || addr >= USER_STACK_TOP) return -1;
+  if (addr + USER_STACK_SLACK < user_esp) return -1;  /* esp 와 동떨어진 접근은 스택 확장이 아니라 버그 */
+  return vmm_map_user_range(as, addr & PAGE_FRAME_MASK, PAGE_SIZE, 1);
+}
+
 void vmm_copy_to_user(address_space_t *as, uint32_t dst, const void *src, uint32_t len) {
   uint32_t flags = irq_save();
   uint32_t saved;
@@ -374,6 +380,10 @@ void isr_page_fault(pt_regs* pt){
   uint32_t fault_addr;
   __asm__ volatile("mov %%cr2, %0" : "=r"(fault_addr));
   if (pt->cs & 0x3) {
+    /* 처음으로 복구 가능한 fault: 유저 스택이 매핑된 부분 아래로 자라면 페이지를 붙이고 같은 명령을 다시 실행한다 */
+    if (!(pt->err_code & 0x1) && vmm_grow_user_stack(process_current_as(), fault_addr, pt->useresp) == 0) {
+      return;
+    }
     kprintf("[pid %u] Page Fault at 0x%x (%s, %s) eip=0x%x - killed\n", process_getpid(), fault_addr,
             (pt->err_code & 0x1) ? "protection" : "not-present",
             (pt->err_code & 0x2) ? "write" : "read", pt->eip);

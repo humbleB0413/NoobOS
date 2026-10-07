@@ -52,7 +52,13 @@ typedef struct {
 #define USER_SPACE_BASE 0x08000000u
 #define USER_SPACE_TOP  KERNEL_HEAP_VIRT_BASE
 #define USER_STACK_TOP  USER_SPACE_TOP
+/* 처음에 미리 매핑하는 스택 페이지 수. 그 아래는 page fault 때 필요한 만큼 붙인다(demand paging) */
 #define USER_STACK_PAGES 4
+/* 스택이 자랄 수 있는 최대 크기(1MB). ELF 세그먼트는 이 예약 구간과 겹칠 수 없다 */
+#define USER_STACK_MAX_PAGES 256
+#define USER_STACK_LIMIT (USER_STACK_TOP - USER_STACK_MAX_PAGES * 4096)
+/* esp 보다 이만큼 아래까지의 접근은 정상적인 스택 확장으로 본다 (sub esp 후 아래쪽부터 쓰는 큰 지역 배열 등) */
+#define USER_STACK_SLACK 65536
 
 /*
  * 프로세스별 페이지 디렉터리. 커널 PDE(identity 4MB, 힙)는 kernel_pdt 의 것을 그대로 복사해
@@ -87,6 +93,8 @@ void vmm_copy_to_user(address_space_t *as, uint32_t dst, const void *src, uint32
 /* [addr, addr+len) 이 전부 as 에 유저 접근 가능하게 매핑돼 있는지 (writable 이면 쓰기 가능까지) */
 int vmm_user_range_ok(address_space_t *as, uint32_t addr, uint32_t len, int writable);
 void vmm_switch(uint32_t cr3);
+/* fault 주소가 스택 예약 구간 안이고 esp 근처면 그 페이지를 매핑해 0 을 돌려준다(복구 가능한 fault). 아니면 -1 */
+int vmm_grow_user_stack(address_space_t *as, uint32_t addr, uint32_t user_esp);
 
 #ifdef DEBUG
 void kmalloc_selftest();
